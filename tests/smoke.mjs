@@ -34,6 +34,8 @@ const element = (id) => {
 let nextId = 0;
 const persisted = new Map();
 const mockTags = [];
+const mockProjects = [];
+let projectCreates = 0;
 const mockTasks = [];
 let tagCreates = 0;
 let addTaskCount = 0;
@@ -65,7 +67,8 @@ const context = {
     cfg: { platform: 'desktop', lang: { code: 'en' } },
     loadSyncedData: async (key) => persisted.get(key) || null,
     persistDataSynced: async (value, key) => persisted.set(key, value),
-    getAllProjects: async () => [], getAllTags: async () => mockTags, getTasks: async () => mockTasks,
+    getAllProjects: async () => mockProjects, getAllTags: async () => mockTags, getTasks: async () => mockTasks,
+    addProject: async ({ title }) => { projectCreates++; const id = `p-${projectCreates}`; mockProjects.push({ id, title }); return id; },
     addTag: async ({ title }) => { tagCreates++; mockTags.push({ id: 'course-tag', title }); return 'course-tag'; },
     addTask: async (task) => {
       addedTask = task;
@@ -210,6 +213,17 @@ await evaluate('syncCourses([state.courses[0]])');
 assert.equal(addTaskCount, beforeRepeat, 'a second sync reuses the existing tasks');
 assert.deepEqual(Array.from(addedTask.tagIds), ['tag-one', 'course-tag']);
 assert.equal(tagCreates, 1, 'existing category tag is reused');
+// Course tasks go into their own project: the Inbox is a real project, not a
+// filter, so without this every class task piles up there.
+assert.equal(evaluate('courseProjectName()'), '课程[Course]', 'the default name carries the recognisable suffix');
+assert.equal(evaluate("projectNameOf('Classes', false, '[Course]')"), 'Classes', 'the suffix can be switched off');
+assert.equal(evaluate("projectNameOf('', false, '')"), '课程', 'an empty name falls back to the default');
+assert.equal(projectCreates, 1, 'the project is created once');
+assert.ok(created.every((task) => task.projectId === 'p-1'), 'course tasks point at the course project');
+assert.equal(mockProjects[0].title, '课程[Course]');
+// A second sync must reuse it, not create another one.
+await evaluate('syncCourses([state.courses[0]])');
+assert.equal(projectCreates, 1, 'a repeated sync reuses the existing project');
 // An update that fails must not spawn a duplicate either.
 const realUpdateTask = context.PluginAPI.updateTask;
 evaluate('PluginAPI.updateTask = async () => { throw new Error("task gone"); }');

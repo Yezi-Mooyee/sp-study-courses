@@ -184,6 +184,13 @@
         <label><span data-i18n="UI.ACCENT">Card accent color</span><select id="settings-accent"><option value="theme" data-i18n="UI.FOLLOW_THEME">Follow SP theme</option><option value="blue" data-i18n="UI.BLUE">Blue</option><option value="green" data-i18n="UI.GREEN">Green</option><option value="orange" data-i18n="UI.ORANGE">Orange</option><option value="purple" data-i18n="UI.PURPLE">Purple</option><option value="custom" data-i18n="UI.CUSTOM_COLOR">Custom</option></select></label>
         <label id="custom-color-row"><span data-i18n="UI.CUSTOM_COLOR_VALUE">Custom card color</span><input id="settings-custom-color" type="color" value="#3b82f6" /></label>
         <label><input id="settings-weekends" type="checkbox" /><span data-i18n="UI.SHOW_WEEKENDS">Show weekends</span></label>
+        <fieldset><legend data-i18n="UI.PROJECT_TITLE">Synced task project</legend>
+          <label><span data-i18n="UI.PROJECT_NAME">Project name</span><input id="settings-project-name" type="text" /></label>
+          <label><input id="settings-project-suffix-on" type="checkbox" /><span data-i18n="UI.PROJECT_SUFFIX_ON">Append a suffix so the name is easy to recognise</span></label>
+          <label><span data-i18n="UI.PROJECT_SUFFIX">Name suffix</span><input id="settings-project-suffix" type="text" /></label>
+          <div class="actions"><button id="settings-project-suffix-reset" type="button" class="plain" data-i18n="UI.PROJECT_SUFFIX_RESET">Reset suffix</button></div>
+          <p id="settings-project-preview"></p>
+        </fieldset>
         <label><span data-i18n="UI.TIME_LABELS">Timeline time labels</span><select id="settings-time-labels"><option value="each" data-i18n="UI.TIME_EACH">Show on every course</option><option value="shared" data-i18n="UI.TIME_SHARED">Merge identical times on the left</option></select></label>
         <fieldset><legend data-i18n="UI.STATS_VISIBILITY">Show statistics</legend><div id="settings-stat-options" class="stat-options"></div></fieldset>
         <div class="actions"><button id="settings-cancel" type="button" class="plain" data-i18n="UI.CANCEL">Cancel</button><button class="primary" data-i18n="UI.SAVE">Save</button></div>
@@ -215,7 +222,13 @@
     <script>
       let state = { version: 3, semesterId: 'default', semester: { name: '', startDate: '', weeks: 18 }, courses: [], assignments: [], events: [], exceptions: [], semesters: {} };
       const STAT_KEYS = ['UI.STAT_WEEK_HOURS', 'UI.STAT_TODAY_HOURS', 'UI.STAT_EARLY', 'UI.STAT_LATE', 'UI.STAT_PROGRESS', 'UI.STAT_FREE', 'UI.STAT_BUSY'];
-      let settings = { density: 'comfortable', language: 'auto', accent: 'theme', customColor: '#3b82f6', showWeekends: true, displayMode: 'timeline', timeLabels: 'shared', courseSort: 'time', hiddenStats: [] };
+      // Synced course tasks must live in a project, otherwise every one of them
+      // lands in the Inbox, which is a real project, not a filter. The suffix
+      // exists to make the name recognisable at a glance without looking like a
+      // name a person would pick, so it will not collide with one of yours.
+      const DEFAULT_PROJECT_NAME = '课程';
+      const DEFAULT_PROJECT_SUFFIX = '[Course]';
+      let settings = { density: 'comfortable', language: 'auto', accent: 'theme', customColor: '#3b82f6', showWeekends: true, displayMode: 'timeline', timeLabels: 'shared', courseSort: 'time', hiddenStats: [], projectName: DEFAULT_PROJECT_NAME, useProjectSuffix: true, projectSuffix: DEFAULT_PROJECT_SUFFIX };
       let projects = [];
       let tags = [];
       let selectedWeek = 1;
@@ -642,6 +655,36 @@ $('help-copy').innerHTML = zh ? `<h3>快速开始</h3><ol><li>新建学期</li><
       function groupForKey(key) {
         return courseGroups().find((group) => group.key === key) || null;
       }
+      function projectNameOf(name, suffixOn, suffix) {
+        const base = String(name ?? DEFAULT_PROJECT_NAME).trim() || DEFAULT_PROJECT_NAME;
+        const tail = String(suffix ?? DEFAULT_PROJECT_SUFFIX).trim();
+        return suffixOn && tail ? `${base}${tail}` : base;
+      }
+      const courseProjectName = () => projectNameOf(settings.projectName, settings.useProjectSuffix !== false, settings.projectSuffix);
+      const projectDraft = () => ({ name: $('settings-project-name').value, suffixOn: $('settings-project-suffix-on').checked, suffix: $('settings-project-suffix').value });
+      async function updateProjectPreview() {
+        const draft = projectDraft();
+        $('settings-project-suffix').disabled = !draft.suffixOn;
+        $('settings-project-preview').textContent = await tr('UI.PROJECT_PREVIEW', { name: projectNameOf(draft.name, draft.suffixOn, draft.suffix) });
+      }
+      // Find the project by exact name, or create it. A renamed project is left
+      // alone: the old one keeps its tasks and the new name starts empty.
+      async function courseProjectId() {
+        const name = courseProjectName();
+        const find = (list) => (list || []).find((project) => project.title === name);
+        const known = find(projects);
+        if (known) return known.id;
+        try { projects = await PluginAPI.getAllProjects(); } catch (error) { console.error(error); }
+        const found = find(projects);
+        if (found) return found.id;
+        if (typeof PluginAPI.addProject !== 'function') return null;
+        try {
+          const created = await PluginAPI.addProject({ title: name });
+          const id = typeof created === 'string' ? created : created?.id;
+          if (id) projects = [...projects, { id, title: name }];
+          return id || null;
+        } catch (error) { console.error(error); return null; }
+      }
       // SP's plugin API cannot create a task repeat configuration: the repeat
       // state is exposed read-only and no repeat action is in the dispatch
       // allowlist. The rolling window below is the plugin-side equivalent — it
@@ -683,11 +726,11 @@ $('help-copy').innerHTML = zh ? `<h3>快速开始</h3><ol><li>新建学期</li><
         }
         return index;
       }
-      function taskForOccurrence(course, occurrence) {
+      function taskForOccurrence(course, occurrence, defaultProjectId) {
         const duration = Math.max(0, minutesOfDay(course.endTime) - minutesOfDay(course.startTime)) * 60000;
         return {
           title: `${course.taskPrefix || '[Course]'} ${course.name}`.trim(),
-          projectId: course.projectId,
+          projectId: course.projectId || defaultProjectId || undefined,
           tagIds: course.tagIds || [],
           notes: `Course: ${course.name}\nCourse ID: ${course.id}\nOccurrence: ${localDate(occurrence.start)}\nTime: ${course.startTime}-${course.endTime}\nLocation: ${course.location || ''}\nTeacher: ${course.teacher || ''}`,
           dueWithTime: occurrence.start.getTime(),
@@ -716,11 +759,11 @@ $('help-copy').innerHTML = zh ? `<h3>快速开始</h3><ol><li>新建学期</li><
         catch (error) { console.error('scheduling the course task failed', error); }
         return id;
       }
-      async function syncCourseOccurrences(course, index, weeks) {
+      async function syncCourseOccurrences(course, index, weeks, projectId) {
         const tagIds = await courseTaskTagIds(course);
         for (const occurrence of occurrencesInWeeks(course, weeks)) {
           const key = `${course.id}|${localDate(occurrence.start)}`;
-          const data = taskForOccurrence(course, occurrence);
+          const data = taskForOccurrence(course, occurrence, projectId);
           data.tagIds = tagIds;
           const taskId = await upsertCourseTask(data, index.get(key) || null);
           if (taskId) index.set(key, taskId);
@@ -736,7 +779,8 @@ $('help-copy').innerHTML = zh ? `<h3>快速开始</h3><ol><li>新建学期</li><
         try {
           const index = await courseTaskIndex();
           const weeks = syncWindowWeeks();
-          for (const course of courses) await syncCourseOccurrences(course, index, weeks);
+          const projectId = await courseProjectId();
+          for (const course of courses) await syncCourseOccurrences(course, index, weeks, projectId);
           await save(); await refreshTasks(); await render();
           PluginAPI.showSnack({ msg: await tr('UI.SYNCED'), type: 'SUCCESS' });
           return true;
@@ -770,13 +814,17 @@ $('help-copy').innerHTML = zh ? `<h3>快速开始</h3><ol><li>新建学期</li><
         $('settings-custom-color').value = settings.customColor;
         $('settings-weekends').checked = settings.showWeekends;
         $('settings-time-labels').value = settings.timeLabels;
+        $('settings-project-name').value = settings.projectName || DEFAULT_PROJECT_NAME;
+        $('settings-project-suffix-on').checked = settings.useProjectSuffix !== false;
+        $('settings-project-suffix').value = settings.projectSuffix ?? DEFAULT_PROJECT_SUFFIX;
+        await updateProjectPreview();
         $('settings-stat-options').innerHTML = (await Promise.all(STAT_KEYS.map(async (key) => `<label><input type="checkbox" data-stat-key="${key}" ${settings.hiddenStats.includes(key) ? '' : 'checked'} />${esc(await tr(key))}</label>`))).join('');
         $('settings-dialog').showModal();
       };
       $('settings-cancel').onclick = () => $('settings-dialog').close();
       $('settings-form').onsubmit = async (event) => {
         event.preventDefault();
-        settings = { ...settings, density: $('settings-density').value, accent: $('settings-accent').value, customColor: $('settings-custom-color').value, showWeekends: $('settings-weekends').checked, timeLabels: $('settings-time-labels').value, hiddenStats: [...$('settings-stat-options').querySelectorAll('[data-stat-key]:not(:checked)')].map((input) => input.dataset.statKey) };
+        settings = { ...settings, density: $('settings-density').value, accent: $('settings-accent').value, customColor: $('settings-custom-color').value, showWeekends: $('settings-weekends').checked, timeLabels: $('settings-time-labels').value, hiddenStats: [...$('settings-stat-options').querySelectorAll('[data-stat-key]:not(:checked)')].map((input) => input.dataset.statKey), projectName: projectDraft().name, useProjectSuffix: projectDraft().suffixOn, projectSuffix: projectDraft().suffix };
         await saveSettings();
         applySettings();
         await applyTranslations();
@@ -785,6 +833,12 @@ $('help-copy').innerHTML = zh ? `<h3>快速开始</h3><ol><li>新建学期</li><
         PluginAPI.showSnack({ msg: await tr('UI.SETTINGS_SAVED'), type: 'SUCCESS' });
       };
       $('settings-accent').onchange = () => { $('custom-color-row').hidden = $('settings-accent').value !== 'custom'; };
+      $('settings-project-name').oninput = () => updateProjectPreview();
+      $('settings-project-suffix').oninput = () => updateProjectPreview();
+      $('settings-project-suffix-on').onchange = () => updateProjectPreview();
+      // Fills the input instead of saving on its own, so restoring the default is
+      // the same flow as typing it: the change still lands on Save.
+      $('settings-project-suffix-reset').onclick = () => { $('settings-project-suffix').value = DEFAULT_PROJECT_SUFFIX; updateProjectPreview(); };
       $('help').onclick = () => $('help-dialog').showModal();
       $('display-mode').onchange = async () => { displayMode = $('display-mode').value; settings.displayMode = displayMode; await saveSettings(); await render(); };
       $('course-sort').onchange = async () => { settings.courseSort = $('course-sort').value === 'name' ? 'name' : 'time'; await saveSettings(); await renderTimetable(); };
