@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Yezi Mooyee
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
@@ -7,6 +8,8 @@ const source = html.match(/<script>([\s\S]*?)<\/script>/)?.[1];
 assert.ok(source, 'inline plugin script exists');
 
 const elements = new Map();
+const enMessages = JSON.parse(readFileSync(new URL('../i18n/en.json', import.meta.url), 'utf8'));
+const zhMessages = JSON.parse(readFileSync(new URL('../i18n/zh.json', import.meta.url), 'utf8'));
 const weekdaySelectIds = new Set(['weekday', 'exception-weekday', 'import-edit-weekday']);
 const element = (id) => {
   if (!elements.has(id)) {
@@ -32,9 +35,14 @@ const element = (id) => {
 let nextId = 0;
 const persisted = new Map();
 const mockTags = [];
+const mockProjects = [];
+let projectCreates = 0;
+const mockTasks = [];
 let tagCreates = 0;
+let addTaskCount = 0;
 let addedTask = null;
 let updatedTask = null;
+const updateCalls = [];
 let hostDownload = null;
 let postedDownload = null;
 let darkTheme = false;
@@ -60,11 +68,32 @@ const context = {
     cfg: { platform: 'desktop', lang: { code: 'en' } },
     loadSyncedData: async (key) => persisted.get(key) || null,
     persistDataSynced: async (value, key) => persisted.set(key, value),
-    getAllProjects: async () => [], getAllTags: async () => mockTags, getTasks: async () => [],
+    getAllProjects: async () => mockProjects, getAllTags: async () => mockTags, getTasks: async () => mockTasks,
+    addProject: async ({ title }) => { projectCreates++; const id = `p-${projectCreates}`; mockProjects.push({ id, title }); return id; },
     addTag: async ({ title }) => { tagCreates++; mockTags.push({ id: 'course-tag', title }); return 'course-tag'; },
-    addTask: async (task) => { addedTask = task; return 'sp-course-task'; },
-    updateTask: async (id, task) => { updatedTask = { id, ...task }; },
-    downloadFile: async (filename, data) => { hostDownload = { filename, data }; }, translate: async (key) => key, showSnack() {},
+    addTask: async (task) => {
+      addedTask = task;
+      addTaskCount++;
+      const id = `sp-course-task-${addTaskCount}`;
+      mockTasks.push({ id, ...task });
+      return id;
+    },
+    updateTask: async (id, task) => {
+      updatedTask = { id, ...task };
+      updateCalls.push(updatedTask);
+      const found = mockTasks.find((entry) => entry.id === id);
+      if (found) Object.assign(found, task);
+    },
+    downloadFile: async (filename, data) => { hostDownload = { filename, data }; },
+    // The plugin no longer carries its own dictionaries: the host resolves keys
+    // from the plugin's i18n/en.json, which is what this mock stands in for.
+    getCurrentLanguage: () => context.PluginAPI.cfg.lang.code,
+    translate: async (key, params = {}) => {
+      const dict = /^zh/i.test(context.PluginAPI.cfg.lang.code) ? zhMessages : enMessages;
+      const text = key.split('.').reduce((value, part) => value?.[part], dict) ?? key;
+      return String(text).replace(/\{\{(\w+)\}\}/g, (match, name) => name in params ? String(params[name]) : match);
+    },
+    showSnack() {},
   },
 };
 runInNewContext(source, context, { filename: 'index.inline.js' });
@@ -89,14 +118,15 @@ assert.equal(evaluate("weekdayFromText('星期五')"), 5);
 assert.deepEqual(Array.from(evaluate("parseWeekSpec('1~3,5~16周').weeks")), [1,2,3,5,6,7,8,9,10,11,12,13,14,15,16]);
 assert.equal(evaluate("parseWeekSpec('单周').pattern"), 'odd');
 assert.equal(evaluate("parseWeekSpec('双周').pattern"), 'even');
-evaluate("settings.language = 'zh'");
+evaluate("PluginAPI.cfg.lang.code = 'zh-CN'");
+await evaluate('loadMessages()');
 assert.equal(evaluate("localText('UI.EVENT_EXAM')"), '考试');
 assert.ok(evaluate("eventLabel({ type:'quiz', title:'测验' })").includes('小测'));
 evaluate("pendingImport = { entries:[], corrected:2 }; renderImportPreview()");
 assert.equal(element('import-summary').textContent, '有效 0 · 已修正 2 · 无效 0');
-evaluate("settings.language = 'auto'; PluginAPI.cfg.lang.code = 'zh-CN'");
-assert.equal(evaluate("localText('UI.NONE')"), '无');
-evaluate("settings.language = 'en'; PluginAPI.cfg.lang.code = 'en'");
+evaluate("PluginAPI.cfg.lang.code = 'en'");
+await evaluate('loadMessages()');
+assert.equal(evaluate("localText('UI.NONE')"), 'None');
 assert.equal(evaluate("localText('UI.EVENT_EXAM')"), 'Exam');
 evaluate('pendingImport = null');
 await evaluate("sendDownload('timetable.csv', 'course data', 'DOWNLOAD_TEXT')");
@@ -155,13 +185,53 @@ assert.ok(evaluate("JSON.stringify({ ...state, settings }).includes('\\\"courses
 assert.equal(evaluate('conflictIds(state.courses, 1).size'), 2);
 assert.equal(evaluate('weekStatistics(1).totalMinutes'), 120);
 evaluate("state.courses[0].taskPrefix = '[A]'; state.courses[0].tagIds = ['tag-one']");
-assert.equal(evaluate('taskForCourse(state.courses[0]).tagIds[0]'), 'tag-one');
-await evaluate('syncCourseGroup(courseGroups()[0])');
+// A course task must carry a real timestamp: SP only puts a task on the schedule
+// timeline when dueWithTime is set, and addTask's create payload cannot carry it.
+const occurrence = evaluate('occurrenceFor(state.courses[0], 7)');
+context.occurrence = occurrence;
+const payload = evaluate('taskForOccurrence(state.courses[0], occurrence)');
+assert.equal(payload.dueDay, null, 'the payload does not carry a day-only due date');
+assert.equal(payload.dueWithTime, occurrence.start.getTime(), 'the timestamp is the class start');
+assert.equal(new Date(payload.dueWithTime).getHours(), 9, 'the timestamp uses the class start hour');
+assert.equal(payload.timeEstimate, 60 * 60000, 'the estimate equals the class length');
+assert.equal(payload.title, '[A] A', 'the title does not repeat the start time');
+assert.match(payload.notes, /Occurrence: \d{4}-\d{2}-\d{2}/, 'the notes carry the occurrence date');
+// The plugin cannot create an SP repeat configuration, so the window materialises
+// the current teaching week plus the next one.
+assert.equal(evaluate('syncWindowWeeks().length'), 2, 'two teaching weeks are materialised');
+mockTasks.length = 0;
+const beforeSync = addTaskCount;
+assert.equal(await evaluate('syncCourses([state.courses[0]])'), true);
+assert.equal(addTaskCount - beforeSync, 2, 'one task per class in the window');
+const created = mockTasks.filter((task) => String(task.notes).includes('Course ID: a'));
+assert.equal(created.length, 2, 'both occurrences are linked to the course');
+assert.ok(created.every((task) => task.dueDay === null && typeof task.dueWithTime === 'number'), 'the follow-up update schedules each task');
+assert.equal(Math.round((created[1].dueWithTime - created[0].dueWithTime) / 86400000), 7, 'the two occurrences are a week apart');
+// Repeating the sync must not add copies: course id plus occurrence date is the
+// identity the index looks up, because SP itself never dedupes.
+const beforeRepeat = addTaskCount;
+await evaluate('syncCourses([state.courses[0]])');
+assert.equal(addTaskCount, beforeRepeat, 'a second sync reuses the existing tasks');
 assert.deepEqual(Array.from(addedTask.tagIds), ['tag-one', 'course-tag']);
-assert.equal(tagCreates, 1);
-await evaluate('syncCourseGroup(courseGroups()[0])');
-assert.ok(updatedTask.tagIds.includes('course-tag'));
 assert.equal(tagCreates, 1, 'existing category tag is reused');
+// Course tasks go into their own project: the Inbox is a real project, not a
+// filter, so without this every class task piles up there.
+assert.equal(evaluate('courseProjectName()'), '课程[Course]', 'the default name carries the recognisable suffix');
+assert.equal(evaluate("projectNameOf('Classes', false, '[Course]')"), 'Classes', 'the suffix can be switched off');
+assert.equal(evaluate("projectNameOf('', false, '')"), '课程', 'an empty name falls back to the default');
+assert.equal(projectCreates, 1, 'the project is created once');
+assert.ok(created.every((task) => task.projectId === 'p-1'), 'course tasks point at the course project');
+assert.equal(mockProjects[0].title, '课程[Course]');
+// A second sync must reuse it, not create another one.
+await evaluate('syncCourses([state.courses[0]])');
+assert.equal(projectCreates, 1, 'a repeated sync reuses the existing project');
+// An update that fails must not spawn a duplicate either.
+const realUpdateTask = context.PluginAPI.updateTask;
+evaluate('PluginAPI.updateTask = async () => { throw new Error("task gone"); }');
+const beforeFailure = addTaskCount;
+await evaluate('syncCourses([state.courses[0]])');
+assert.equal(addTaskCount, beforeFailure, 'a failing update does not create a second task');
+context.PluginAPI.updateTask = realUpdateTask;
 evaluate('tags = []; PluginAPI.getAllTags = undefined; PluginAPI.addTag = undefined');
 assert.deepEqual(Array.from(await evaluate('courseTaskTagIds(state.courses[0])')), ['tag-one'], 'tag API fallback keeps selected tags');
 evaluate("state.exceptions = [{ id:'x', courseId:'a', week:1, cancelled:true }]");
@@ -255,4 +325,15 @@ await evaluate("$('course-form').onsubmit({ preventDefault() {} })");
 const saved = evaluate("state.courses.find((course) => course.name === 'Saved multi')");
 assert.deepEqual(Array.from(saved.weekdays), [1, 3]);
 assert.equal(saved.weekday, 1, 'the first selected day stays readable to older plugin builds');
+// Two timetable entries of the same course are separate tasks. Grouping them into
+// one task with the other slots buried in its notes turned a 20-slot week into 12
+// blocks.
+evaluate("state.courses = [{ id:'c1', name:'Calc', weekday:1, startTime:'08:00', endTime:'09:40', startWeek:1, endWeek:16, pattern:'every', customWeeks:[] }, { id:'c2', name:'Calc', weekday:3, startTime:'10:00', endTime:'11:40', startWeek:1, endWeek:16, pattern:'every', customWeeks:[] }]");
+mockTasks.length = 0;
+const beforePerEntry = addTaskCount;
+await evaluate('syncCourses(state.courses)');
+assert.equal(addTaskCount - beforePerEntry, 4, 'each entry materialises its own classes in the window');
+const entryIds = mockTasks.map((task) => String(task.notes).match(/Course ID: (\S+)/)?.[1]);
+assert.deepEqual(Array.from(new Set(entryIds)).sort(), ['c1', 'c2'], 'the entries keep separate links');
+assert.ok(!String(addedTask.notes).includes('Sections:'), 'no section list is stuffed into the notes');
 console.log('parser, preview, conflicts, exceptions, ICS, synced persistence smoke passed');

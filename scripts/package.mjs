@@ -1,16 +1,20 @@
+// Copyright (c) 2026 Yezi Mooyee
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { deflateRawSync, inflateRawSync } from 'node:zlib';
 import './build.mjs';
 
-const SIZE_LIMIT = 100_000;
+// Matches SP's own cap: MAX_PLUGIN_MANIFEST_SIZE = 100 * 1024, enforced against
+// index.html in plugin.service.ts. The old 100_000 was ours, not the host's.
+const SIZE_LIMIT = 100 * 1024;
 const ENTRIES = [
   'manifest.json',
   'plugin.js',
   'index.html',
   'icon.svg',
   'course-import-template.csv',
+  'LICENSE',
   'i18n/en.json',
   'i18n/zh.json',
 ];
