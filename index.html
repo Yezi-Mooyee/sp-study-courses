@@ -704,19 +704,9 @@ $('help-copy').innerHTML = zh ? `<h3>快速开始</h3><ol><li>新建学期</li><
         catch (error) { console.error('scheduling the course task failed', error); }
         return id;
       }
-      async function syncCourseGroup(group) {
-        if (typeof PluginAPI.addTask !== 'function') { PluginAPI.showSnack?.({ msg: await tr('UI.SYNC_UNSUPPORTED'), type: 'ERROR' }); return false; }
-        const representative = group.representative;
-        const task = taskForCourse(representative);
-        task.tagIds = await courseTaskTagIds(representative);
-        task.notes += `\nSections: ${group.courses.map((course) => `${course.startTime}-${course.endTime} ${course.location || ''} ${course.teacher || ''}`).join(' | ')}`;
-        const existingTaskId = group.courses.find((course) => course.taskId)?.taskId;
-        const taskId = await upsertCourseTask(task, existingTaskId);
-        if (!taskId) { PluginAPI.showSnack({ msg: await tr('UI.SYNC_UNSUPPORTED'), type: 'ERROR' }); return false; }
-        group.courses.forEach((course) => { course.taskId = taskId; });
-        return true;
-      }
-
+      // One course entry = one SP task, matching SP's own model. A course that
+      // meets on several days is several entries, so each gets its own task at its
+      // own time instead of one task carrying the other slots in its notes.
       async function syncCourse(course) {
         if (typeof PluginAPI.addTask !== 'function') { PluginAPI.showSnack?.({ msg: await tr('UI.SYNC_UNSUPPORTED'), type: 'ERROR' }); return false; }
         const data = taskForCourse(course);
@@ -734,8 +724,7 @@ $('help-copy').innerHTML = zh ? `<h3>快速开始</h3><ol><li>新建学期</li><
         if (isSyncingAll) return;
         isSyncingAll = true;
         try {
-          const groups = courseGroups(courses);
-          for (const group of groups) await syncCourseGroup(group);
+          for (const course of courses) await syncCourse(course);
           await save(); await refreshTasks(); await render();
           PluginAPI.showSnack({ msg: await tr('UI.SYNCED'), type: 'SUCCESS' });
         } finally { isSyncingAll = false; }

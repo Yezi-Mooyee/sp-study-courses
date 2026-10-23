@@ -64,7 +64,7 @@ const context = {
     persistDataSynced: async (value, key) => persisted.set(key, value),
     getAllProjects: async () => [], getAllTags: async () => mockTags, getTasks: async () => [],
     addTag: async ({ title }) => { tagCreates++; mockTags.push({ id: 'course-tag', title }); return 'course-tag'; },
-    addTask: async (task) => { addedTask = task; addTaskCount++; return 'sp-course-task'; },
+    addTask: async (task) => { addedTask = task; addTaskCount++; return `sp-course-task-${addTaskCount}`; },
     updateTask: async (id, task) => { updatedTask = { id, ...task }; updateCalls.push(updatedTask); },
     downloadFile: async (filename, data) => { hostDownload = { filename, data }; }, translate: async (key) => key, showSnack() {},
   },
@@ -169,7 +169,7 @@ assert.equal(courseTask.dueWithTime, evaluate('nextOccurrence(state.courses[0]).
 assert.equal(new Date(courseTask.dueWithTime).getHours(), 9, 'timestamp uses the class start hour');
 assert.equal(courseTask.timeEstimate, 60 * 60000, 'estimate equals the class length');
 assert.equal(courseTask.title, '[A] A', 'title no longer repeats the start time');
-await evaluate('syncCourseGroup(courseGroups()[0])');
+await evaluate('syncCourse(state.courses[0])');
 // SP's addTask create payload has no dueWithTime (it only advertises dueDay, and
 // silently drops anything else), so the day is set at creation and the timestamp
 // in the follow-up updateTask call. Without that second call the task stays
@@ -180,14 +180,14 @@ assert.equal(updatedTask.dueWithTime, courseTask.dueWithTime, 'the follow-up upd
 assert.equal(updatedTask.dueDay, null, 'the follow-up update clears the day-only date');
 assert.deepEqual(Array.from(addedTask.tagIds), ['tag-one', 'course-tag']);
 assert.equal(tagCreates, 1);
-await evaluate('syncCourseGroup(courseGroups()[0])');
+await evaluate('syncCourse(state.courses[0])');
 assert.ok(updateCalls.some((call) => (call.tagIds || []).includes('course-tag')), 'the update path carries the tag ids');
 assert.equal(tagCreates, 1, 'existing category tag is reused');
 // A link to a task that no longer exists (deleted or archived in SP) must not
 // block re-syncing: the plugin recreates the task instead of giving up on it.
 evaluate('PluginAPI.updateTask = async () => { throw new Error("task gone"); }');
 const beforeRecreate = addTaskCount;
-await evaluate('syncCourseGroup(courseGroups()[0])');
+await evaluate('syncCourse(state.courses[0])');
 assert.equal(addTaskCount, beforeRecreate + 1, 'a stale task link is recreated');
 assert.match(addedTask.dueDay, /^\d{4}-\d{2}-\d{2}$/, 'the recreated task still gets the day');
 evaluate('PluginAPI.updateTask = async (id, task) => { updatedTask = { id, ...task }; };');
@@ -284,4 +284,13 @@ await evaluate("$('course-form').onsubmit({ preventDefault() {} })");
 const saved = evaluate("state.courses.find((course) => course.name === 'Saved multi')");
 assert.deepEqual(Array.from(saved.weekdays), [1, 3]);
 assert.equal(saved.weekday, 1, 'the first selected day stays readable to older plugin builds');
+// Two timetable entries of the same course are two tasks. Grouping them into one
+// task with the other slots buried in its notes turned a 20-slot week into 12
+// blocks.
+evaluate("state.courses = [{ id:'c1', name:'Calc', weekday:1, startTime:'08:00', endTime:'09:40', startWeek:1, endWeek:16, pattern:'every', customWeeks:[] }, { id:'c2', name:'Calc', weekday:3, startTime:'10:00', endTime:'11:40', startWeek:1, endWeek:16, pattern:'every', customWeeks:[] }]");
+const beforePerEntry = addTaskCount;
+await evaluate('syncCourses(state.courses)');
+assert.equal(addTaskCount, beforePerEntry + 2, 'each entry becomes its own task');
+assert.notEqual(evaluate('state.courses[0].taskId'), evaluate('state.courses[1].taskId'), 'the entries keep separate task ids');
+assert.ok(!String(addedTask.notes).includes('Sections:'), 'no section list is stuffed into the notes');
 console.log('parser, preview, conflicts, exceptions, ICS, synced persistence smoke passed');
