@@ -684,12 +684,36 @@ $('help-copy').innerHTML = zh ? `<h3>快速开始</h3><ol><li>新建学期</li><
       function groupForKey(key) {
         return courseGroups().find((group) => group.key === key) || null;
       }
+      // A course task records its course ids in the notes ("Course ID: x" for a
+      // single course, "Course IDs: x, y" for a group). SP never dedupes — every
+      // addTask creates another task — so before creating anything we adopt the
+      // tasks that already point at this course. That is what stops repeated
+      // syncs from stacking duplicates into the same time slot.
+      async function linkedCourseTasks(courseIds) {
+        const wanted = new Set(courseIds.map(String));
+        let tasks = spTasks;
+        try { tasks = await PluginAPI.getTasks(); spTasks = tasks; } catch (error) { console.error(error); }
+        return (tasks || []).filter((task) => {
+          const ids = String(task.notes || '').match(/Course IDs?:\s*([^\n]*)/i);
+          if (!ids) return false;
+          return ids[1].split(/[,\s]+/).some((id) => wanted.has(id.trim()));
+        });
+      }
+      async function resolveCourseTaskId(courseIds, storedTaskId) {
+        const ids = (await linkedCourseTasks(courseIds)).map((task) => task.id);
+        if (!storedTaskId) return ids[0] || null;
+        if (ids.includes(storedTaskId)) return storedTaskId;
+        // Another task already points at this course (the link was lost but the
+        // task survived): adopt it instead of adding a second one. With nothing
+        // found, keep the stored id; upsert decides whether it is really gone.
+        return ids[0] || storedTaskId;
+      }
       // Two steps are required: PluginAPI.addTask only accepts a day-level dueDay
       // (its create payload has no dueWithTime and silently drops it), while
       // updateTask forwards the whole partial task. So create/update with the day
       // first, then apply the timestamp, which is what puts the task on the
       // schedule timeline instead of leaving it unscheduled in the inbox.
-      async function upsertCourseTask(data, taskId) {
+      async function upsertCourseTask(data, taskId, courseIds) {
         const canUpdate = typeof PluginAPI.updateTask === 'function';
         if (taskId && !canUpdate) return null;
         const { dueWithTime, dueDay, ...rest } = data;
@@ -697,21 +721,29 @@ $('help-copy').innerHTML = zh ? `<h3>快速开始</h3><ol><li>新建学期</li><
         let id = taskId;
         if (id) {
           try { await PluginAPI.updateTask(id, dayOnly); }
-          catch (error) { console.error('updateTask failed, recreating task', error); id = null; }
+          catch (error) {
+            console.error('updateTask failed', error);
+            // Recreate only when the linked task is really gone. Recreating on any
+            // error was what turned one bad sync into a stack of duplicates.
+            const stillThere = (await linkedCourseTasks(courseIds)).some((task) => task.id === id);
+            if (stillThere) return id;
+            id = null;
+          }
         }
         if (!id) id = await PluginAPI.addTask(dayOnly);
         try { await PluginAPI.updateTask(id, { dueWithTime, dueDay: null }); }
         catch (error) { console.error('scheduling the course task failed', error); }
         return id;
       }
-      // One course entry = one SP task, matching SP's own model. A course that
-      // meets on several days is several entries, so each gets its own task at its
-      // own time instead of one task carrying the other slots in its notes.
+      // One course entry = one SP task, matching SP's own model. Courses that meet
+      // on several days are separate entries, so each gets its own task at its own
+      // time instead of one task with the other slots buried in its notes.
       async function syncCourse(course) {
         if (typeof PluginAPI.addTask !== 'function') { PluginAPI.showSnack?.({ msg: await tr('UI.SYNC_UNSUPPORTED'), type: 'ERROR' }); return false; }
+        const courseIds = [course.id];
         const data = taskForCourse(course);
         data.tagIds = await courseTaskTagIds(course);
-        const taskId = await upsertCourseTask(data, course.taskId);
+        const taskId = await upsertCourseTask(data, await resolveCourseTaskId(courseIds, course.taskId), courseIds);
         if (!taskId) { PluginAPI.showSnack({ msg: await tr('UI.SYNC_UNSUPPORTED'), type: 'ERROR' }); return false; }
         course.taskId = taskId;
         return true;
