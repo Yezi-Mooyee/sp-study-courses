@@ -7,6 +7,8 @@ const source = html.match(/<script>([\s\S]*?)<\/script>/)?.[1];
 assert.ok(source, 'inline plugin script exists');
 
 const elements = new Map();
+const enMessages = JSON.parse(readFileSync(new URL('../i18n/en.json', import.meta.url), 'utf8'));
+const zhMessages = JSON.parse(readFileSync(new URL('../i18n/zh.json', import.meta.url), 'utf8'));
 const weekdaySelectIds = new Set(['weekday', 'exception-weekday', 'import-edit-weekday']);
 const element = (id) => {
   if (!elements.has(id)) {
@@ -78,7 +80,16 @@ const context = {
       const found = mockTasks.find((entry) => entry.id === id);
       if (found) Object.assign(found, task);
     },
-    downloadFile: async (filename, data) => { hostDownload = { filename, data }; }, translate: async (key) => key, showSnack() {},
+    downloadFile: async (filename, data) => { hostDownload = { filename, data }; },
+    // The plugin no longer carries its own dictionaries: the host resolves keys
+    // from the plugin's i18n/en.json, which is what this mock stands in for.
+    getCurrentLanguage: () => context.PluginAPI.cfg.lang.code,
+    translate: async (key, params = {}) => {
+      const dict = /^zh/i.test(context.PluginAPI.cfg.lang.code) ? zhMessages : enMessages;
+      const text = key.split('.').reduce((value, part) => value?.[part], dict) ?? key;
+      return String(text).replace(/\{\{(\w+)\}\}/g, (match, name) => name in params ? String(params[name]) : match);
+    },
+    showSnack() {},
   },
 };
 runInNewContext(source, context, { filename: 'index.inline.js' });
@@ -103,14 +114,15 @@ assert.equal(evaluate("weekdayFromText('星期五')"), 5);
 assert.deepEqual(Array.from(evaluate("parseWeekSpec('1~3,5~16周').weeks")), [1,2,3,5,6,7,8,9,10,11,12,13,14,15,16]);
 assert.equal(evaluate("parseWeekSpec('单周').pattern"), 'odd');
 assert.equal(evaluate("parseWeekSpec('双周').pattern"), 'even');
-evaluate("settings.language = 'zh'");
+evaluate("PluginAPI.cfg.lang.code = 'zh-CN'");
+await evaluate('loadMessages()');
 assert.equal(evaluate("localText('UI.EVENT_EXAM')"), '考试');
 assert.ok(evaluate("eventLabel({ type:'quiz', title:'测验' })").includes('小测'));
 evaluate("pendingImport = { entries:[], corrected:2 }; renderImportPreview()");
 assert.equal(element('import-summary').textContent, '有效 0 · 已修正 2 · 无效 0');
-evaluate("settings.language = 'auto'; PluginAPI.cfg.lang.code = 'zh-CN'");
-assert.equal(evaluate("localText('UI.NONE')"), '无');
-evaluate("settings.language = 'en'; PluginAPI.cfg.lang.code = 'en'");
+evaluate("PluginAPI.cfg.lang.code = 'en'");
+await evaluate('loadMessages()');
+assert.equal(evaluate("localText('UI.NONE')"), 'None');
 assert.equal(evaluate("localText('UI.EVENT_EXAM')"), 'Exam');
 evaluate('pendingImport = null');
 await evaluate("sendDownload('timetable.csv', 'course data', 'DOWNLOAD_TEXT')");

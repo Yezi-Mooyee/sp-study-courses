@@ -181,7 +181,6 @@
     <dialog id="settings-dialog">
       <form id="settings-form">
         <label><span data-i18n="UI.DENSITY">Layout density</span><select id="settings-density"><option value="comfortable" data-i18n="UI.COMFORTABLE">Comfortable</option><option value="compact" data-i18n="UI.COMPACT">Compact</option></select></label>
-        <label><span data-i18n="UI.LANGUAGE">Plugin language</span><select id="settings-language"><option value="auto" data-i18n="UI.LANGUAGE_AUTO">Follow SP language</option><option value="zh">中文</option><option value="en">English</option></select></label>
         <label><span data-i18n="UI.ACCENT">Card accent color</span><select id="settings-accent"><option value="theme" data-i18n="UI.FOLLOW_THEME">Follow SP theme</option><option value="blue" data-i18n="UI.BLUE">Blue</option><option value="green" data-i18n="UI.GREEN">Green</option><option value="orange" data-i18n="UI.ORANGE">Orange</option><option value="purple" data-i18n="UI.PURPLE">Purple</option><option value="custom" data-i18n="UI.CUSTOM_COLOR">Custom</option></select></label>
         <label id="custom-color-row"><span data-i18n="UI.CUSTOM_COLOR_VALUE">Custom card color</span><input id="settings-custom-color" type="color" value="#3b82f6" /></label>
         <label><input id="settings-weekends" type="checkbox" /><span data-i18n="UI.SHOW_WEEKENDS">Show weekends</span></label>
@@ -229,32 +228,19 @@
       const selectedWeekdays = (id) => Array.from($(id).selectedOptions).map((option) => Number(option.value));
       const setSelectedWeekdays = (id, days) => { const chosen = days.length ? days : [1]; Array.from($(id).options).forEach((option) => { option.selected = chosen.includes(Number(option.value)); }); };
       const isMobile = () => ['android', 'ios'].includes(PluginAPI.cfg?.platform) || matchMedia('(max-width: 680px)').matches;
-      const LOCAL_TRANSLATIONS = {
-        en: { UI: { TITLE:'Courses & Timetable', COURSES:'Courses', SEMESTER:'Semester', CURRENT_SEMESTER:'Current semester', NEW_SEMESTER:'New semester', CLEAR_SEMESTER:'Clear current timetable', CONFIRM_CLEAR_SEMESTER:'Clear all courses and assignments in the current semester?', SEMESTER_NAME:'Semester name', START_DATE:'First Monday', WEEKS:'Weeks', SAVE_SEMESTER:'Save semester', WEEK:'Week', PREVIOUS:'Previous', NEXT:'Next', ADD_COURSE:'Add course', IMPORT:'Import CSV / HTML', SYNC_ALL:'Sync to plan', SYNC:'Sync', NO_CLASSES:'No classes this week.', CURRENT:'Now: {{name}} ({{time}})', FREE_NOW:'No class now', NEXT_CLASS:'Next: {{name}} at {{time}}', NO_NEXT:'No more classes today', SINCE_START:'Starts in {{minutes}} min', UNTIL_END:'Ends in {{minutes}} min', SYNCED:'Plan synced', SYNC_UNSUPPORTED:'This SP version cannot update existing tasks.', COURSE_NAME:'Course name', TEACHER:'Teacher', LOCATION:'Location', WEEKDAY:'Weekday', START_TIME:'Start time', END_TIME:'End time', START_WEEK:'Start week', END_WEEK:'End week', PATTERN:'Week pattern', CUSTOM_WEEKS:'Custom weeks (comma separated)', COLOR:'Color', NOTE:'Note', OBSIDIAN_LINK:'Obsidian link', PROJECT:'Assignment project', NONE:'None', EVERY:'Every week', ODD:'Odd weeks', EVEN:'Even weeks', CUSTOM:'Custom weeks', SAVE:'Save', CANCEL:'Cancel', EDIT:'Edit', DELETE:'Delete', ADD_ASSIGNMENT:'Add assignment', ASSIGNMENT_TITLE:'Assignment title', DUE_DAY:'Due date', ESTIMATE:'Estimate (minutes)', CREATED:'Assignment task created', SAVED:'Course saved', CONFIRM_DELETE:'Delete this course?', IMPORTED:'Imported {{count}} courses', IMPORT_EMPTY:'No recognizable course rows were found.', SETTINGS:'Settings', DENSITY:'Layout density', COMFORTABLE:'Comfortable', COMPACT:'Compact', LANGUAGE:'Plugin language', LANGUAGE_AUTO:'Follow SP language', ACCENT:'Card accent color', FOLLOW_THEME:'Follow SP theme', BLUE:'Blue', GREEN:'Green', ORANGE:'Orange', PURPLE:'Purple', CUSTOM_COLOR:'Custom', CUSTOM_COLOR_VALUE:'Custom card color', SHOW_WEEKENDS:'Show weekends', SETTINGS_SAVED:'Settings saved' }, DAY: { 1:'Monday', 2:'Tuesday', 3:'Wednesday', 4:'Thursday', 5:'Friday', 6:'Saturday', 7:'Sunday' } },
-        zh: { UI: { TITLE:'课程与课表', COURSES:'课程列表', SEMESTER:'学期', CURRENT_SEMESTER:'当前学期', NEW_SEMESTER:'新建学期', CLEAR_SEMESTER:'清空当前学期课表', CONFIRM_CLEAR_SEMESTER:'确定清空当前学期的课程和作业吗？', SEMESTER_NAME:'学期名称', START_DATE:'第一周周一', WEEKS:'总周数', SAVE_SEMESTER:'保存学期', WEEK:'第 {{count}} 周', PREVIOUS:'上一周', NEXT:'下一周', ADD_COURSE:'添加课程', IMPORT:'导入 CSV / HTML', SYNC_ALL:'同步到计划', SYNC:'同步', NO_CLASSES:'本周没有课程。', CURRENT:'现在：{{name}}（{{time}}）', FREE_NOW:'当前没有课', NEXT_CLASS:'下一节：{{name}}，{{time}} 开始', NO_NEXT:'今天没有下一节课', SINCE_START:'距离上课还有 {{minutes}} 分钟', UNTIL_END:'距离下课还有 {{minutes}} 分钟', SYNCED:'计划已同步', SYNC_UNSUPPORTED:'当前 SP 版本不支持更新已有任务。', COURSE_NAME:'课程名称', TEACHER:'教师', LOCATION:'地点', WEEKDAY:'星期', START_TIME:'开始时间', END_TIME:'结束时间', START_WEEK:'开始周', END_WEEK:'结束周', PATTERN:'周次模式', CUSTOM_WEEKS:'自定义周次（逗号分隔）', COLOR:'颜色', NOTE:'备注', OBSIDIAN_LINK:'Obsidian 链接', PROJECT:'作业所属项目', NONE:'无', EVERY:'每周', ODD:'单周', EVEN:'双周', CUSTOM:'自定义周次', SAVE:'保存', CANCEL:'取消', EDIT:'编辑', DELETE:'删除', ADD_ASSIGNMENT:'添加作业', ASSIGNMENT_TITLE:'作业标题', DUE_DAY:'截止日期', ESTIMATE:'预计耗时（分钟）', CREATED:'作业任务已创建', SAVED:'课程已保存', CONFIRM_DELETE:'删除这门课程？', IMPORTED:'已导入 {{count}} 门课程', IMPORT_EMPTY:'没有识别到有效的课程行。', SETTINGS:'设置', DENSITY:'界面密度', COMFORTABLE:'舒适', COMPACT:'紧凑', LANGUAGE:'插件语言', LANGUAGE_AUTO:'跟随 SP 语言', ACCENT:'卡片强调色', FOLLOW_THEME:'跟随 SP 主题', BLUE:'蓝色', GREEN:'绿色', ORANGE:'橙色', PURPLE:'紫色', CUSTOM_COLOR:'自定义', CUSTOM_COLOR_VALUE:'自定义卡片颜色', SHOW_WEEKENDS:'显示周末', SETTINGS_SAVED:'设置已保存' }, DAY: { 1:'周一', 2:'周二', 3:'周三', 4:'周四', 5:'周五', 6:'周六', 7:'周日' } }
-      };
-Object.assign(LOCAL_TRANSLATIONS.en.UI, { EDIT_SEMESTER:'Edit semester', PASTE_IMPORT:'Paste timetable', EXPORT:'Export', TIMELINE:'Timeline', LIST:'Compact list', HELP:'Help', HELP_TITLE:'Using the timetable', CLOSE:'Close', PASTE_TITLE:'Paste web timetable', PASTE_HINT:'Copy a timetable from your school website and paste it here.', TIME_LABELS:'Timeline time labels', TIME_EACH:'Show on every course', TIME_SHARED:'Merge identical times on the left' });
-      Object.assign(LOCAL_TRANSLATIONS.zh.UI, { EDIT_SEMESTER:'编辑学期', PASTE_IMPORT:'粘贴网页课表', EXPORT:'导出', TIMELINE:'时间轴', LIST:'紧凑列表', HELP:'帮助', HELP_TITLE:'使用说明', CLOSE:'关闭', PASTE_TITLE:'粘贴网页课表', PASTE_HINT:'从教务系统复制课表后粘贴到这里。', TIME_LABELS:'时间轴时间显示', TIME_EACH:'每节课上方显示', TIME_SHARED:'相同时间合并到左侧' });
-Object.assign(LOCAL_TRANSLATIONS.en.UI, { VIEW_TIMETABLE:'Timetable', VIEW_PLAN:'Plan', VIEW_TODAY:'Today', TODAY_COURSES:"Today's classes", TODAY_TASKS:"Today's tasks", TODAY_DDL:"Today's deadlines", UPCOMING_EVENTS:'Upcoming events', EVENT:'Course event', EVENT_TYPE:'Event type', ADD_EVENT:'Add event', NO_EVENTS:'Nothing scheduled', EXCEPTION:'Reschedule / cancel', RESET_EXCEPTION:'Use normal schedule', CANCEL_CLASS:'Cancel this class', TASK_PREFIX:'Task title prefix', ADD_TASK:'Add task', OPEN_TASKS:'open tasks', SYNCED_STATUS:'Synced', NOT_SYNCED:'Not synced', OPEN_NOTES:'Open course notes', CONFLICT_CONFIRM:'This course conflicts with another class in at least one week. Save anyway?', IMPORT_PREVIEW:'Import preview', VALID:'Valid', DUPLICATE:'Duplicate', CONFLICT:'Conflict', INVALID:'Invalid', CORRECTED:'Corrected', MORE:'More' });
-      Object.assign(LOCAL_TRANSLATIONS.zh.UI, { VIEW_TIMETABLE:'课表', VIEW_PLAN:'计划', VIEW_TODAY:'今日', TODAY_COURSES:'今天全部课程', TODAY_TASKS:'今日任务', TODAY_DDL:'今日 DDL', UPCOMING_EVENTS:'即将发生的课程事件', EVENT:'课程事件', EVENT_TYPE:'事件类型', ADD_EVENT:'添加事件', NO_EVENTS:'暂无安排', EXCEPTION:'调课 / 停课', RESET_EXCEPTION:'恢复正常课表', CANCEL_CLASS:'本周停课', TASK_PREFIX:'默认任务标题前缀', ADD_TASK:'添加任务', OPEN_TASKS:'个未完成任务', SYNCED_STATUS:'已同步', NOT_SYNCED:'未同步', OPEN_NOTES:'打开课程笔记', CONFLICT_CONFIRM:'这门课程至少在一周内与其他课程时间冲突，仍然保存吗？', IMPORT_PREVIEW:'导入预览', VALID:'有效', DUPLICATE:'重复', CONFLICT:'冲突', INVALID:'无效', CORRECTED:'已修正', MORE:'更多' });
-      Object.assign(LOCAL_TRANSLATIONS.en.UI, { OFFICE_UNSUPPORTED:'This device cannot decompress Office files. Try CSV, HTML, or web paste.', XLSX_NO_SHEET:'No timetable worksheet was found in this workbook.', DOCX_IMAGE_ONLY:'This Word file appears to contain only a timetable image. OCR is not supported.', DOCX_NO_TABLE:'No timetable table or supported course paragraphs were found in this Word file.' });
-      Object.assign(LOCAL_TRANSLATIONS.zh.UI, { OFFICE_UNSUPPORTED:'当前设备无法解压 Office 文件，请改用 CSV、HTML 或网页粘贴。', XLSX_NO_SHEET:'工作簿中没有找到可识别的课表工作表。', DOCX_IMAGE_ONLY:'Word 文件似乎只有课表图片；目前不支持 OCR。', DOCX_NO_TABLE:'Word 文件中没有找到可识别的课表表格或课程段落。' });
-      Object.assign(LOCAL_TRANSLATIONS.en.UI, { SORT_BY:'Sort by', SORT_TIME:'Time', SORT_NAME:'Name' });
-      Object.assign(LOCAL_TRANSLATIONS.zh.UI, { SORT_BY:'排序', SORT_TIME:'时间', SORT_NAME:'名称' });
-      Object.assign(LOCAL_TRANSLATIONS.en.UI, { COPY_LINK:'Copy link', COPY_MANUAL:'Select and copy the link above if it did not open.', COPIED:'Link copied' });
-      Object.assign(LOCAL_TRANSLATIONS.zh.UI, { COPY_LINK:'复制链接', COPY_MANUAL:'若未能打开，请选中并复制上方链接。', COPIED:'链接已复制' });
-      Object.assign(LOCAL_TRANSLATIONS.en.UI, { EXPORT_FALLBACK:'If the download did not start, copy the file contents below.', COPY_EXPORT:'Copy contents' });
-      Object.assign(LOCAL_TRANSLATIONS.zh.UI, { EXPORT_FALLBACK:'如果下载没有开始，可复制下方文件内容。', COPY_EXPORT:'复制内容' });
-      Object.assign(LOCAL_TRANSLATIONS.en.UI, { TAGS:'Default tags', STATS_VISIBILITY:'Show statistics', STAT_WEEK_HOURS:'This week', STAT_TODAY_HOURS:'Today', STAT_EARLY:'Early classes', STAT_LATE:'Evening classes', STAT_PROGRESS:'Semester progress', STAT_FREE:'Longest free gap', STAT_BUSY:'Busiest two hours' });
-      Object.assign(LOCAL_TRANSLATIONS.zh.UI, { TAGS:'默认标签', STATS_VISIBILITY:'显示统计项', STAT_WEEK_HOURS:'本周上课时长', STAT_TODAY_HOURS:'今日上课时长', STAT_EARLY:'早八次数', STAT_LATE:'晚课次数', STAT_PROGRESS:'学期进度', STAT_FREE:'本周最长空档', STAT_BUSY:'本周最忙两小时' });
-      Object.assign(LOCAL_TRANSLATIONS.en.UI, { STATUS:'Status', SECTIONS:'{{count}} sections', PREVIEW_SUMMARY:'{{valid}} valid · {{corrected}} corrected · {{invalid}} invalid', EXPORT_JSON:'JSON backup', WORKSPACE_VIEWS:'Workspace views', DISPLAY_MODE:'Display mode', WEEK_STATS:'Week statistics', SP_TASK_ID:'SP task ID', EVENT_ASSIGNMENT:'Assignment', EVENT_EXAM:'Exam', EVENT_QUIZ:'Quiz', EVENT_REPORT:'Report', EVENT_PRESENTATION:'Presentation', EVENT_CUSTOM:'Custom' });
-      Object.assign(LOCAL_TRANSLATIONS.zh.UI, { STATUS:'状态', SECTIONS:'{{count}} 个时段', PREVIEW_SUMMARY:'有效 {{valid}} · 已修正 {{corrected}} · 无效 {{invalid}}', EXPORT_JSON:'JSON 备份', WORKSPACE_VIEWS:'工作台视图', DISPLAY_MODE:'显示方式', WEEK_STATS:'本周统计', SP_TASK_ID:'SP 任务 ID', EVENT_ASSIGNMENT:'作业', EVENT_EXAM:'考试', EVENT_QUIZ:'小测', EVENT_REPORT:'报告', EVENT_PRESENTATION:'展示', EVENT_CUSTOM:'其他' });
-      Object.assign(LOCAL_TRANSLATIONS.en.UI, { WEEKDAYS:'Weekdays (select one or more)' });
-      Object.assign(LOCAL_TRANSLATIONS.zh.UI, { WEEKDAYS:'星期（可多选）' });
-      const lookup = (object, key) => key.split('.').reduce((value, part) => value?.[part], object);
-      const interpolate = (text, params = {}) => text.replace(/\{\{(\w+)\}\}/g, (match, key) => key in params ? String(params[key]) : match);
-      const localText = (key, params) => { const language = settings.language === 'auto' ? (/^zh/i.test(PluginAPI.cfg?.lang?.code || navigator.language) ? 'zh' : 'en') : settings.language; return interpolate(lookup(LOCAL_TRANSLATIONS[language], key) || lookup(LOCAL_TRANSLATIONS.en, key) || key, params); };
-      const tr = async (key, params) => { if (settings.language === 'auto' && typeof PluginAPI.translate === 'function') { const translated = await PluginAPI.translate(key, params); if (translated && translated !== key) return translated; } const language = settings.language === 'auto' ? (/^zh/i.test(PluginAPI.cfg?.lang?.code || navigator.language) ? 'zh' : 'en') : settings.language; return interpolate(lookup(LOCAL_TRANSLATIONS[language], key) || lookup(LOCAL_TRANSLATIONS.en, key) || key, params); };
+      // Translations live in i18n/*.json and are resolved by the host. The strings
+      // only a synchronous render path needs are cached once at startup; everything
+      // else calls PluginAPI.translate directly.
+      const MESSAGE_KEYS = ['DAY.1', 'DAY.2', 'DAY.3', 'DAY.4', 'DAY.5', 'DAY.6', 'DAY.7', 'UI.NONE', 'UI.VALID', 'UI.INVALID', 'UI.DUPLICATE', 'UI.CONFLICT', 'UI.CORRECTED', 'UI.PREVIEW_SUMMARY', 'UI.EVENT_ASSIGNMENT', 'UI.EVENT_EXAM', 'UI.EVENT_QUIZ', 'UI.EVENT_REPORT', 'UI.EVENT_PRESENTATION', 'UI.EVENT_CUSTOM'];
+      let messages = {};
+      const interpolate = (text, params = {}) => String(text).replace(/\{\{(\w+)\}\}/g, (match, key) => key in params ? String(params[key]) : match);
+      const localText = (key, params) => interpolate(messages[key] ?? key, params);
+      const tr = async (key, params) => typeof PluginAPI.translate === 'function' ? PluginAPI.translate(key, params) : key;
+      async function loadMessages() {
+        if (typeof PluginAPI.translate !== 'function') return;
+        await Promise.all(MESSAGE_KEYS.map(async (key) => { try { messages[key] = await PluginAPI.translate(key); } catch (error) { console.error(error); } }));
+      }
+      const isZh = () => { try { return /^zh/i.test(PluginAPI.getCurrentLanguage?.() || PluginAPI.cfg?.lang?.code || navigator.language); } catch (error) { return false; } };
       const esc = (value) => { const e = document.createElement('div'); e.textContent = value ?? ''; return e.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;'); };
       const uid = () => crypto.randomUUID();
       const safeObsidianUrl = (value) => /^obsidian:\/\/[^\s<>"']+$/i.test(String(value || '')) ? String(value) : '';
@@ -408,7 +394,7 @@ Object.assign(LOCAL_TRANSLATIONS.en.UI, { VIEW_TIMETABLE:'Timetable', VIEW_PLAN:
       }
       function sortedCourseGroups() {
         const groups = courseGroups();
-        if (settings.courseSort === 'name') return groups.sort((a, b) => a.name.localeCompare(b.name, settings.language === 'zh' ? 'zh' : 'en') || a.key.localeCompare(b.key));
+        if (settings.courseSort === 'name') return groups.sort((a, b) => a.name.localeCompare(b.name, isZh() ? 'zh' : 'en') || a.key.localeCompare(b.key));
         const firstTime = (group) => Math.min(...group.courses.map((course) => (courseWeekdays(course)[0] - 1) * 1440 + minutesOfDay(course.startTime)));
         return groups.sort((a, b) => firstTime(a) - firstTime(b) || a.name.localeCompare(b.name) || a.key.localeCompare(b.key));
       }
@@ -439,16 +425,6 @@ Object.assign(LOCAL_TRANSLATIONS.en.UI, { VIEW_TIMETABLE:'Timetable', VIEW_PLAN:
         const end = new Date(date); const [endHour, endMinute] = resolved.endTime.split(':').map(Number); end.setHours(endHour, endMinute, 0, 0);
         return { course: resolved, week, start, end };
       }
-      function nextOccurrence(course, now = new Date()) {
-        if (!state.semester.startDate) return null;
-        const firstWeek = Math.max(1, semesterWeek(now) || 1);
-        for (let week = firstWeek; week <= state.semester.weeks; week++) {
-          const upcoming = courseSessions(course, week).map((session) => occurrenceFor(session, week)).filter((occurrence) => occurrence && occurrence.start > now).sort((a, b) => a.start - b.start);
-          if (upcoming.length) return upcoming[0];
-        }
-        return null;
-      }
-
       function liveContext(now = new Date()) {
         const weekday = now.getDay() === 0 ? 7 : now.getDay();
         const week = semesterWeek(now);
@@ -510,7 +486,7 @@ Object.assign(LOCAL_TRANSLATIONS.en.UI, { VIEW_TIMETABLE:'Timetable', VIEW_PLAN:
         renderHelp();
       }
       function renderHelp() {
-        const zh = settings.language === 'zh' || (settings.language === 'auto' && /^zh/i.test(PluginAPI.cfg?.lang?.code || navigator.language));
+        const zh = isZh();
 $('help-copy').innerHTML = zh ? `<h3>快速开始</h3><ol><li>新建学期</li><li>设置第一周周一</li><li>导入或粘贴课程表</li><li>检查导入预览</li><li>使用课表、今日和计划视图</li><li>可选：同步到 SP</li></ol><h3>支持的导入方式</h3><p>支持粘贴网页课表、XLSX、CSV/TSV、HTML 和 DOCX。Word 优先识别表格课表；图片型 Word 不做 OCR。PDF 和图片暂不是主要支持格式。</p><h3>周次与星期</h3><p><code>1周</code>、<code>1~8周</code>、<code>1,3,5周</code>、<code>1~3,5~16周</code>、单周、双周；星期支持周一、星期一、Monday、Mon、月曜日和数字写法。一门课一周上多天时多选「星期」，或在导入表里写成 周一,周三；调课与停课作用于整周。</p><h3>学期管理</h3><p>“第一周周一”是教学周计算基准。每个学期独立保存课程、事件、调课和任务关联。清空当前学期不会删除 SP 任务。</p><h3>SP 同步</h3><p>同步课程会创建一个 SP 任务并保存对应关系；修改课程后再次同步会更新该任务。插件也会读取现有 SP 任务，通过 courseId、projectId、备注和标题识别所属课程。</p><h3>导出</h3><p>ICS 用于日历；CSV 用于 Excel 查看和交换；JSON 保存完整插件数据。</p><h3>移动端与同步</h3><p>每台设备安装一次插件；数据随后通过 SP 同步。</p><h3>常见问题</h3><p>识别失败时检查星期、时间和周次；图片型 Word 不支持。冲突可确认保存，调课/停课只影响指定周。</p>` : `<h3>Quick start</h3><ol><li>Create a semester</li><li>Set its first Monday</li><li>Import or paste a timetable</li><li>Review the import preview</li><li>Use Timetable, Today, and Plan</li><li>Optionally sync to SP</li></ol><h3>Imports</h3><p>Paste web timetables or import XLSX, CSV/TSV, HTML, and DOCX. Word table timetables are preferred; image-only Word files are not OCRed. PDF and images are not primary formats.</p><h3>Weeks and weekdays</h3><p>Supports <code>1 week</code>, <code>1-8 weeks</code>, <code>1,3,5 weeks</code>, mixed ranges, odd/even weeks; weekdays include Monday, Mon, 周一, 月曜日, and numeric forms. A course can meet several days a week: select them here, or import a list such as <code>Mon,Wed</code>. Rescheduling and cancellation apply to the whole course that week.</p><h3>Semesters</h3><p>The first Monday is the teaching-week baseline. Each semester keeps separate courses, events, exceptions, and task links. Clearing a semester never deletes SP tasks.</p><h3>SP sync</h3><p>Sync creates a mapped SP task; syncing again after edits updates it. Existing SP tasks are associated by course ID, project, notes, and title.</p><h3>Exports</h3><p>ICS is for calendars, CSV for spreadsheets/exchange, and JSON for a complete backup.</p><h3>Mobile and sync</h3><p>Install once per device; data then follows SP sync.</p><h3>FAQ</h3><p>Check weekday, time, and week rules when parsing fails. Image-only Word is unsupported. Conflicts may be saved; exceptions affect one week.</p>`;
       }
 
@@ -790,7 +766,6 @@ $('help-copy').innerHTML = zh ? `<h3>快速开始</h3><ol><li>新建学期</li><
       $('mobile-settings').onclick = () => { $('mobile-more-dialog').close(); $('settings').click(); };
       $('settings').onclick = async () => {
         $('settings-density').value = settings.density;
-        $('settings-language').value = settings.language;
         $('settings-accent').value = settings.accent;
         $('settings-custom-color').value = settings.customColor;
         $('settings-weekends').checked = settings.showWeekends;
@@ -801,7 +776,7 @@ $('help-copy').innerHTML = zh ? `<h3>快速开始</h3><ol><li>新建学期</li><
       $('settings-cancel').onclick = () => $('settings-dialog').close();
       $('settings-form').onsubmit = async (event) => {
         event.preventDefault();
-        settings = { ...settings, density: $('settings-density').value, language: $('settings-language').value, accent: $('settings-accent').value, customColor: $('settings-custom-color').value, showWeekends: $('settings-weekends').checked, timeLabels: $('settings-time-labels').value, hiddenStats: [...$('settings-stat-options').querySelectorAll('[data-stat-key]:not(:checked)')].map((input) => input.dataset.statKey) };
+        settings = { ...settings, density: $('settings-density').value, accent: $('settings-accent').value, customColor: $('settings-custom-color').value, showWeekends: $('settings-weekends').checked, timeLabels: $('settings-time-labels').value, hiddenStats: [...$('settings-stat-options').querySelectorAll('[data-stat-key]:not(:checked)')].map((input) => input.dataset.statKey) };
         await saveSettings();
         applySettings();
         await applyTranslations();
@@ -1488,10 +1463,10 @@ $('event-course').innerHTML = `<option value="">${localText('UI.NONE')}</option>
       $('export-csv').onclick = async () => { await sendDownload(`${state.semester.name || 'timetable'}.csv`.replace(/[<>:"/\\|?*]/g, '_'), buildCsv(), 'DOWNLOAD_TEXT'); $('export-dialog').close(); };
       $('export-json').onclick = async () => { await sendDownload(`${state.semester.name || 'timetable'}.json`.replace(/[<>:"/\\|?*]/g, '_'), JSON.stringify({ ...state, settings }, null, 2), 'DOWNLOAD_TEXT'); $('export-dialog').close(); };
 
-      async function init() { await load(); if (!initialized && isMobile()) activeView = 'today'; initialized = true; applySettings(); await applyTranslations(); renderSemesterOptions(); await render(); }
+      async function init() { await load(); if (!initialized && isMobile()) activeView = 'today'; initialized = true; applySettings(); await loadMessages(); await applyTranslations(); renderSemesterOptions(); await render(); }
       setInterval(() => { if (document.visibilityState === 'visible') activeView === 'today' ? renderToday() : activeView === 'timetable' ? renderStatus() : null; }, 60000);
       if (typeof PluginAPI.registerHook === 'function' && PluginAPI.Hooks) {
-        PluginAPI.registerHook(PluginAPI.Hooks.LANGUAGE_CHANGE, async () => { await applyTranslations(); await render(); if (pendingImport) renderImportPreview(); });
+        PluginAPI.registerHook(PluginAPI.Hooks.LANGUAGE_CHANGE, async () => { await loadMessages(); await applyTranslations(); await render(); if (pendingImport) renderImportPreview(); });
         PluginAPI.registerHook(PluginAPI.Hooks.PERSISTED_DATA_CHANGED, init);
         for (const hook of [PluginAPI.Hooks.TASK_UPDATE, PluginAPI.Hooks.TASK_COMPLETE, PluginAPI.Hooks.TASK_DELETE].filter(Boolean)) PluginAPI.registerHook(hook, async () => { await refreshTasks(); await render(); });
       }
