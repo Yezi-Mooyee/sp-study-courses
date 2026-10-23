@@ -33,8 +33,10 @@ let nextId = 0;
 const persisted = new Map();
 const mockTags = [];
 let tagCreates = 0;
+let addTaskCount = 0;
 let addedTask = null;
 let updatedTask = null;
+const updateCalls = [];
 let hostDownload = null;
 let postedDownload = null;
 let darkTheme = false;
@@ -62,8 +64,8 @@ const context = {
     persistDataSynced: async (value, key) => persisted.set(key, value),
     getAllProjects: async () => [], getAllTags: async () => mockTags, getTasks: async () => [],
     addTag: async ({ title }) => { tagCreates++; mockTags.push({ id: 'course-tag', title }); return 'course-tag'; },
-    addTask: async (task) => { addedTask = task; return 'sp-course-task'; },
-    updateTask: async (id, task) => { updatedTask = { id, ...task }; },
+    addTask: async (task) => { addedTask = task; addTaskCount++; return 'sp-course-task'; },
+    updateTask: async (id, task) => { updatedTask = { id, ...task }; updateCalls.push(updatedTask); },
     downloadFile: async (filename, data) => { hostDownload = { filename, data }; }, translate: async (key) => key, showSnack() {},
   },
 };
@@ -156,12 +158,39 @@ assert.equal(evaluate('conflictIds(state.courses, 1).size'), 2);
 assert.equal(evaluate('weekStatistics(1).totalMinutes'), 120);
 evaluate("state.courses[0].taskPrefix = '[A]'; state.courses[0].tagIds = ['tag-one']");
 assert.equal(evaluate('taskForCourse(state.courses[0]).tagIds[0]'), 'tag-one');
+// Regression: a course task must carry a real timestamp. SP only puts a task on
+// the schedule timeline when dueWithTime is set; a time string in the title or
+// notes used to leave it as a day-level task that could never show up at its
+// class time.
+const courseTask = evaluate('taskForCourse(state.courses[0])');
+assert.equal(courseTask.dueDay, null, 'course task no longer carries a day-only due date');
+assert.equal(typeof courseTask.dueWithTime, 'number', 'course task carries a dueWithTime timestamp');
+assert.equal(courseTask.dueWithTime, evaluate('nextOccurrence(state.courses[0]).start.getTime()'), 'timestamp is the next class start');
+assert.equal(new Date(courseTask.dueWithTime).getHours(), 9, 'timestamp uses the class start hour');
+assert.equal(courseTask.timeEstimate, 60 * 60000, 'estimate equals the class length');
+assert.equal(courseTask.title, '[A] A', 'title no longer repeats the start time');
 await evaluate('syncCourseGroup(courseGroups()[0])');
+// SP's addTask create payload has no dueWithTime (it only advertises dueDay, and
+// silently drops anything else), so the day is set at creation and the timestamp
+// in the follow-up updateTask call. Without that second call the task stays
+// unscheduled in the inbox and never reaches the schedule timeline.
+assert.equal(addedTask.dueWithTime, undefined, 'create payload stays day-level');
+assert.match(addedTask.dueDay, /^\d{4}-\d{2}-\d{2}$/, 'create payload carries the class day');
+assert.equal(updatedTask.dueWithTime, courseTask.dueWithTime, 'the follow-up update schedules the task');
+assert.equal(updatedTask.dueDay, null, 'the follow-up update clears the day-only date');
 assert.deepEqual(Array.from(addedTask.tagIds), ['tag-one', 'course-tag']);
 assert.equal(tagCreates, 1);
 await evaluate('syncCourseGroup(courseGroups()[0])');
-assert.ok(updatedTask.tagIds.includes('course-tag'));
+assert.ok(updateCalls.some((call) => (call.tagIds || []).includes('course-tag')), 'the update path carries the tag ids');
 assert.equal(tagCreates, 1, 'existing category tag is reused');
+// A link to a task that no longer exists (deleted or archived in SP) must not
+// block re-syncing: the plugin recreates the task instead of giving up on it.
+evaluate('PluginAPI.updateTask = async () => { throw new Error("task gone"); }');
+const beforeRecreate = addTaskCount;
+await evaluate('syncCourseGroup(courseGroups()[0])');
+assert.equal(addTaskCount, beforeRecreate + 1, 'a stale task link is recreated');
+assert.match(addedTask.dueDay, /^\d{4}-\d{2}-\d{2}$/, 'the recreated task still gets the day');
+evaluate('PluginAPI.updateTask = async (id, task) => { updatedTask = { id, ...task }; };');
 evaluate('tags = []; PluginAPI.getAllTags = undefined; PluginAPI.addTag = undefined');
 assert.deepEqual(Array.from(await evaluate('courseTaskTagIds(state.courses[0])')), ['tag-one'], 'tag API fallback keeps selected tags');
 evaluate("state.exceptions = [{ id:'x', courseId:'a', week:1, cancelled:true }]");

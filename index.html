@@ -651,8 +651,18 @@ $('help-copy').innerHTML = zh ? `<h3>快速开始</h3><ol><li>新建学期</li><
         const occurrence = nextOccurrence(course, new Date(now.getTime() - 60000));
         const fallback = new Date(now); fallback.setDate(fallback.getDate() + (courseWeekdays(course)[0] - (fallback.getDay() || 7) + 7) % 7);
         const dueDate = occurrence?.start || fallback;
+        // The fallback is a bare day; give it the course's real start time so the
+        // task does not silently land at the current clock time.
+        if (!occurrence) {
+          const [startHour, startMinute] = String(course.startTime).split(':').map(Number);
+          dueDate.setHours(startHour || 0, startMinute || 0, 0, 0);
+        }
         const duration = Math.max(0, minutesOfDay(course.endTime) - minutesOfDay(course.startTime)) * 60000;
-        return { title: `${course.taskPrefix || '[Course]'} ${course.name} ${course.startTime}`.trim(), projectId: course.projectId, tagIds: course.tagIds || [], notes: `Course: ${course.name}\nCourse ID: ${course.id}\nTime: ${course.startTime}-${course.endTime}\nLocation: ${course.location || ''}\nTeacher: ${course.teacher || ''}`, dueDay: localDate(dueDate), timeEstimate: duration };
+        // SP places a task on the time axis only when it carries dueWithTime (a real
+        // timestamp). A time string inside the title or notes stays day-level, so the
+        // task never shows up at its class time in the Schedule view and reminders
+        // cannot fire. dueDay is cleared because SP keeps the two fields exclusive.
+        return { title: `${course.taskPrefix || '[Course]'} ${course.name}`.trim(), projectId: course.projectId, tagIds: course.tagIds || [], notes: `Course: ${course.name}\nCourse ID: ${course.id}\nTime: ${course.startTime}-${course.endTime}\nLocation: ${course.location || ''}\nTeacher: ${course.teacher || ''}`, dueWithTime: dueDate.getTime(), dueDay: null, timeEstimate: duration };
       }
       async function courseTaskTagIds(course) {
         const selected = new Set(course.tagIds || []);
@@ -674,6 +684,26 @@ $('help-copy').innerHTML = zh ? `<h3>快速开始</h3><ol><li>新建学期</li><
       function groupForKey(key) {
         return courseGroups().find((group) => group.key === key) || null;
       }
+      // Two steps are required: PluginAPI.addTask only accepts a day-level dueDay
+      // (its create payload has no dueWithTime and silently drops it), while
+      // updateTask forwards the whole partial task. So create/update with the day
+      // first, then apply the timestamp, which is what puts the task on the
+      // schedule timeline instead of leaving it unscheduled in the inbox.
+      async function upsertCourseTask(data, taskId) {
+        const canUpdate = typeof PluginAPI.updateTask === 'function';
+        if (taskId && !canUpdate) return null;
+        const { dueWithTime, dueDay, ...rest } = data;
+        const dayOnly = { ...rest, dueDay: localDate(new Date(dueWithTime)) };
+        let id = taskId;
+        if (id) {
+          try { await PluginAPI.updateTask(id, dayOnly); }
+          catch (error) { console.error('updateTask failed, recreating task', error); id = null; }
+        }
+        if (!id) id = await PluginAPI.addTask(dayOnly);
+        try { await PluginAPI.updateTask(id, { dueWithTime, dueDay: null }); }
+        catch (error) { console.error('scheduling the course task failed', error); }
+        return id;
+      }
       async function syncCourseGroup(group) {
         if (typeof PluginAPI.addTask !== 'function') { PluginAPI.showSnack?.({ msg: await tr('UI.SYNC_UNSUPPORTED'), type: 'ERROR' }); return false; }
         const representative = group.representative;
@@ -681,10 +711,8 @@ $('help-copy').innerHTML = zh ? `<h3>快速开始</h3><ol><li>新建学期</li><
         task.tagIds = await courseTaskTagIds(representative);
         task.notes += `\nSections: ${group.courses.map((course) => `${course.startTime}-${course.endTime} ${course.location || ''} ${course.teacher || ''}`).join(' | ')}`;
         const existingTaskId = group.courses.find((course) => course.taskId)?.taskId;
-        let taskId = existingTaskId;
-        if (taskId && typeof PluginAPI.updateTask === 'function') { task.id = taskId; await PluginAPI.updateTask(taskId, task); }
-        else if (!taskId) taskId = await PluginAPI.addTask(task);
-        else { PluginAPI.showSnack({ msg: await tr('UI.SYNC_UNSUPPORTED'), type: 'ERROR' }); return false; }
+        const taskId = await upsertCourseTask(task, existingTaskId);
+        if (!taskId) { PluginAPI.showSnack({ msg: await tr('UI.SYNC_UNSUPPORTED'), type: 'ERROR' }); return false; }
         group.courses.forEach((course) => { course.taskId = taskId; });
         return true;
       }
@@ -693,17 +721,24 @@ $('help-copy').innerHTML = zh ? `<h3>快速开始</h3><ol><li>新建学期</li><
         if (typeof PluginAPI.addTask !== 'function') { PluginAPI.showSnack?.({ msg: await tr('UI.SYNC_UNSUPPORTED'), type: 'ERROR' }); return false; }
         const data = taskForCourse(course);
         data.tagIds = await courseTaskTagIds(course);
-        if (course.taskId && typeof PluginAPI.updateTask === 'function') await PluginAPI.updateTask(course.taskId, data);
-        else if (!course.taskId) course.taskId = await PluginAPI.addTask(data);
-        else { PluginAPI.showSnack({ msg: await tr('UI.SYNC_UNSUPPORTED'), type: 'ERROR' }); return false; }
+        const taskId = await upsertCourseTask(data, course.taskId);
+        if (!taskId) { PluginAPI.showSnack({ msg: await tr('UI.SYNC_UNSUPPORTED'), type: 'ERROR' }); return false; }
+        course.taskId = taskId;
         return true;
       }
 
+      let isSyncingAll = false;
       async function syncCourses(courses) {
-        const groups = courseGroups(courses);
-        for (const group of groups) await syncCourseGroup(group);
-        await save(); await refreshTasks(); await render();
-        PluginAPI.showSnack({ msg: await tr('UI.SYNCED'), type: 'SUCCESS' });
+        // Clicking sync twice used to run two interleaved passes that both saw an
+        // empty taskId and created a task each.
+        if (isSyncingAll) return;
+        isSyncingAll = true;
+        try {
+          const groups = courseGroups(courses);
+          for (const group of groups) await syncCourseGroup(group);
+          await save(); await refreshTasks(); await render();
+          PluginAPI.showSnack({ msg: await tr('UI.SYNCED'), type: 'SUCCESS' });
+        } finally { isSyncingAll = false; }
       }
 
       $('add').onclick = () => openCourse();
