@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Yezi Mooyee
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';

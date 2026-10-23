@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Yezi Mooyee
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -13,6 +14,7 @@ const ENTRIES = [
   'index.html',
   'icon.svg',
   'course-import-template.csv',
+  'LICENSE',
   'i18n/en.json',
   'i18n/zh.json',
 ];

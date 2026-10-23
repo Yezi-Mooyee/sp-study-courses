@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Yezi Mooyee
 import { copyFileSync, cpSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { transform } from 'esbuild';
 import { minify } from 'html-minifier-terser';
@@ -35,7 +36,7 @@ if (bytes >= PLUGIN_HTML_LIMIT) throw new Error(`Built index.html is ${bytes} by
 const destination = new URL('../dist/', import.meta.url);
 mkdirSync(destination, { recursive: true });
 writeFileSync(new URL('index.html', destination), output);
-for (const name of ['manifest.json', 'plugin.js', 'icon.svg', 'course-import-template.csv']) {
+for (const name of ['manifest.json', 'plugin.js', 'icon.svg', 'course-import-template.csv', 'LICENSE']) {
   copyFileSync(new URL(`../${name}`, import.meta.url), new URL(name, destination));
 }
 cpSync(new URL('../i18n/', import.meta.url), new URL('i18n/', destination), { recursive: true });
