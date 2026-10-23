@@ -612,7 +612,7 @@ $('help-copy').innerHTML = zh ? `<h3>快速开始</h3><ol><li>新建学期</li><
           const sections = group.courses.filter((entry) => visibleSectionIds.has(entry.id));
           const details = sections.map((entry) => `${courseWeekdays(entry).map((day) => localText(`DAY.${day}`)).join('/')} ${entry.startTime}–${entry.endTime} · ${entry.location || ''} · ${entry.teacher || ''}`);
           const tasks = [...new Map(group.courses.flatMap(openTasksForCourse).map((task) => [task.id, task])).values()];
-          const synced = group.courses.some((entry) => entry.taskId);
+          const synced = group.courses.some((entry) => tasksForCourse(entry).length > 0);
           const noteUrl = safeObsidianUrl(course.obsidianLink);
           return `<article class="course" data-course-group="${esc(group.key)}">
             <div class="course-head"><strong>${esc(group.name)}</strong><span class="badge">${tasks.length} ${esc(await tr('UI.OPEN_TASKS'))}</span><span class="badge">${synced ? esc(await tr('UI.SYNCED_STATUS')) : esc(await tr('UI.NOT_SYNCED'))}</span></div>
@@ -646,24 +646,6 @@ $('help-copy').innerHTML = zh ? `<h3>快速开始</h3><ol><li>新建学期</li><
         $('course-dialog').showModal();
       }
 
-      function taskForCourse(course) {
-        const now = new Date();
-        const occurrence = nextOccurrence(course, new Date(now.getTime() - 60000));
-        const fallback = new Date(now); fallback.setDate(fallback.getDate() + (courseWeekdays(course)[0] - (fallback.getDay() || 7) + 7) % 7);
-        const dueDate = occurrence?.start || fallback;
-        // The fallback is a bare day; give it the course's real start time so the
-        // task does not silently land at the current clock time.
-        if (!occurrence) {
-          const [startHour, startMinute] = String(course.startTime).split(':').map(Number);
-          dueDate.setHours(startHour || 0, startMinute || 0, 0, 0);
-        }
-        const duration = Math.max(0, minutesOfDay(course.endTime) - minutesOfDay(course.startTime)) * 60000;
-        // SP places a task on the time axis only when it carries dueWithTime (a real
-        // timestamp). A time string inside the title or notes stays day-level, so the
-        // task never shows up at its class time in the Schedule view and reminders
-        // cannot fire. dueDay is cleared because SP keeps the two fields exclusive.
-        return { title: `${course.taskPrefix || '[Course]'} ${course.name}`.trim(), projectId: course.projectId, tagIds: course.tagIds || [], notes: `Course: ${course.name}\nCourse ID: ${course.id}\nTime: ${course.startTime}-${course.endTime}\nLocation: ${course.location || ''}\nTeacher: ${course.teacher || ''}`, dueWithTime: dueDate.getTime(), dueDay: null, timeEstimate: duration };
-      }
       async function courseTaskTagIds(course) {
         const selected = new Set(course.tagIds || []);
         try {
@@ -684,83 +666,119 @@ $('help-copy').innerHTML = zh ? `<h3>快速开始</h3><ol><li>新建学期</li><
       function groupForKey(key) {
         return courseGroups().find((group) => group.key === key) || null;
       }
-      // A course task records its course ids in the notes ("Course ID: x" for a
-      // single course, "Course IDs: x, y" for a group). SP never dedupes — every
-      // addTask creates another task — so before creating anything we adopt the
-      // tasks that already point at this course. That is what stops repeated
-      // syncs from stacking duplicates into the same time slot.
-      async function linkedCourseTasks(courseIds) {
-        const wanted = new Set(courseIds.map(String));
+      // SP's plugin API cannot create a task repeat configuration: the repeat
+      // state is exposed read-only and no repeat action is in the dispatch
+      // allowlist. The rolling window below is the plugin-side equivalent — it
+      // keeps the current teaching week plus the next one materialised as real
+      // timed tasks, and the next week is added while this one is still running.
+      const SYNC_WEEKS = 2;
+      function syncWindowWeeks() {
+        const current = semesterWeek(new Date());
+        const first = Math.max(1, Math.min(current || 1, state.semester.weeks));
+        const last = Math.min(state.semester.weeks, first + SYNC_WEEKS - 1);
+        const weeks = [];
+        for (let week = first; week <= last; week++) weeks.push(week);
+        return weeks;
+      }
+      function occurrencesInWeeks(course, weeks) {
+        const list = [];
+        for (const week of weeks) for (const session of courseSessions(course, week)) {
+          const occurrence = occurrenceFor(session, week);
+          if (occurrence) list.push(occurrence);
+        }
+        return list;
+      }
+      // A task is known by its course id plus the day it happens. That pair is what
+      // makes a repeated sync idempotent: SP never dedupes, so without a stable key
+      // every pass would add another copy of the same class.
+      function taskLink(task) {
+        const notes = String(task.notes || '');
+        const courseId = notes.match(/Course ID:\s*([^\s,]+)/i)?.[1];
+        const date = notes.match(/Occurrence:\s*(\d{4}-\d{2}-\d{2})/i)?.[1];
+        return courseId && date ? `${courseId}|${date}` : null;
+      }
+      async function courseTaskIndex() {
         let tasks = spTasks;
         try { tasks = await PluginAPI.getTasks(); spTasks = tasks; } catch (error) { console.error(error); }
-        return (tasks || []).filter((task) => {
-          const ids = String(task.notes || '').match(/Course IDs?:\s*([^\n]*)/i);
-          if (!ids) return false;
-          return ids[1].split(/[,\s]+/).some((id) => wanted.has(id.trim()));
-        });
+        const index = new Map();
+        for (const task of tasks || []) {
+          const key = taskLink(task);
+          if (key) index.set(key, task.id);
+        }
+        return index;
       }
-      async function resolveCourseTaskId(courseIds, storedTaskId) {
-        const ids = (await linkedCourseTasks(courseIds)).map((task) => task.id);
-        if (!storedTaskId) return ids[0] || null;
-        if (ids.includes(storedTaskId)) return storedTaskId;
-        // Another task already points at this course (the link was lost but the
-        // task survived): adopt it instead of adding a second one. With nothing
-        // found, keep the stored id; upsert decides whether it is really gone.
-        return ids[0] || storedTaskId;
+      function taskForOccurrence(course, occurrence) {
+        const duration = Math.max(0, minutesOfDay(course.endTime) - minutesOfDay(course.startTime)) * 60000;
+        return {
+          title: `${course.taskPrefix || '[Course]'} ${course.name}`.trim(),
+          projectId: course.projectId,
+          tagIds: course.tagIds || [],
+          notes: `Course: ${course.name}\nCourse ID: ${course.id}\nOccurrence: ${localDate(occurrence.start)}\nTime: ${course.startTime}-${course.endTime}\nLocation: ${course.location || ''}\nTeacher: ${course.teacher || ''}`,
+          dueWithTime: occurrence.start.getTime(),
+          dueDay: null,
+          timeEstimate: duration,
+        };
       }
       // Two steps are required: PluginAPI.addTask only accepts a day-level dueDay
       // (its create payload has no dueWithTime and silently drops it), while
       // updateTask forwards the whole partial task. So create/update with the day
       // first, then apply the timestamp, which is what puts the task on the
       // schedule timeline instead of leaving it unscheduled in the inbox.
-      async function upsertCourseTask(data, taskId, courseIds) {
+      async function upsertCourseTask(data, taskId) {
         const canUpdate = typeof PluginAPI.updateTask === 'function';
-        if (taskId && !canUpdate) return null;
         const { dueWithTime, dueDay, ...rest } = data;
         const dayOnly = { ...rest, dueDay: localDate(new Date(dueWithTime)) };
         let id = taskId;
         if (id) {
+          if (!canUpdate) return id;
           try { await PluginAPI.updateTask(id, dayOnly); }
-          catch (error) {
-            console.error('updateTask failed', error);
-            // Recreate only when the linked task is really gone. Recreating on any
-            // error was what turned one bad sync into a stack of duplicates.
-            const stillThere = (await linkedCourseTasks(courseIds)).some((task) => task.id === id);
-            if (stillThere) return id;
-            id = null;
-          }
+          catch (error) { console.error('updateTask failed', error); return id; }
+        } else {
+          id = await PluginAPI.addTask(dayOnly);
         }
-        if (!id) id = await PluginAPI.addTask(dayOnly);
         try { await PluginAPI.updateTask(id, { dueWithTime, dueDay: null }); }
         catch (error) { console.error('scheduling the course task failed', error); }
         return id;
       }
-      // One course entry = one SP task, matching SP's own model. Courses that meet
-      // on several days are separate entries, so each gets its own task at its own
-      // time instead of one task with the other slots buried in its notes.
-      async function syncCourse(course) {
-        if (typeof PluginAPI.addTask !== 'function') { PluginAPI.showSnack?.({ msg: await tr('UI.SYNC_UNSUPPORTED'), type: 'ERROR' }); return false; }
-        const courseIds = [course.id];
-        const data = taskForCourse(course);
-        data.tagIds = await courseTaskTagIds(course);
-        const taskId = await upsertCourseTask(data, await resolveCourseTaskId(courseIds, course.taskId), courseIds);
-        if (!taskId) { PluginAPI.showSnack({ msg: await tr('UI.SYNC_UNSUPPORTED'), type: 'ERROR' }); return false; }
-        course.taskId = taskId;
-        return true;
+      async function syncCourseOccurrences(course, index, weeks) {
+        const tagIds = await courseTaskTagIds(course);
+        for (const occurrence of occurrencesInWeeks(course, weeks)) {
+          const key = `${course.id}|${localDate(occurrence.start)}`;
+          const data = taskForOccurrence(course, occurrence);
+          data.tagIds = tagIds;
+          const taskId = await upsertCourseTask(data, index.get(key) || null);
+          if (taskId) index.set(key, taskId);
+        }
       }
-
       let isSyncingAll = false;
       async function syncCourses(courses) {
+        if (typeof PluginAPI.addTask !== 'function') { PluginAPI.showSnack?.({ msg: await tr('UI.SYNC_UNSUPPORTED'), type: 'ERROR' }); return false; }
         // Clicking sync twice used to run two interleaved passes that both saw an
-        // empty taskId and created a task each.
-        if (isSyncingAll) return;
+        // empty index and created a task each.
+        if (isSyncingAll) return false;
         isSyncingAll = true;
         try {
-          for (const course of courses) await syncCourse(course);
+          const index = await courseTaskIndex();
+          const weeks = syncWindowWeeks();
+          for (const course of courses) await syncCourseOccurrences(course, index, weeks);
           await save(); await refreshTasks(); await render();
           PluginAPI.showSnack({ msg: await tr('UI.SYNCED'), type: 'SUCCESS' });
+          return true;
         } finally { isSyncingAll = false; }
       }
+      async function syncCourse(course) { return syncCourses([course]); }
+      // The window is meant to stay one week ahead, so the next teaching week is
+      // materialised while the current one runs. The plugin page has to be open for
+      // the timer to fire; a manual sync does the same work.
+      async function autoSyncTick() {
+        if (isSyncingAll || !state.courses.length || !state.semester.startDate) return;
+        if (typeof PluginAPI.addTask !== 'function') return;
+        const index = await courseTaskIndex();
+        const weeks = syncWindowWeeks();
+        const missing = state.courses.some((course) => occurrencesInWeeks(course, weeks).some((occurrence) => !index.has(`${course.id}|${localDate(occurrence.start)}`)));
+        if (missing) await syncCourses(state.courses);
+      }
+      if (typeof setInterval === 'function') setInterval(() => { autoSyncTick().catch((error) => console.error(error)); }, 15 * 60 * 1000);
 
       $('add').onclick = () => openCourse();
       document.querySelectorAll('.view-tab').forEach((button) => button.onclick = async () => { activeView = button.dataset.view; await render(); });
@@ -856,7 +874,7 @@ $('help-copy').innerHTML = zh ? `<h3>快速开始</h3><ol><li>新建学期</li><
         const hasConflict = Array.from({ length: state.semester.weeks }, (_, index) => index + 1).some((week) => conflictIds([...otherCourses, course], week).has(course.id));
         if (hasConflict && !confirm(await tr('UI.CONFLICT_CONFIRM'))) return;
         state.courses = old ? state.courses.map((entry) => entry.id === course.id ? course : entry) : [...state.courses, course];
-        if (old?.taskId) await syncCourse(course);
+        if (tasksForCourse(course).length) await syncCourse(course);
         await save(); $('course-dialog').close(); await render();
         PluginAPI.showSnack({ msg: await tr('UI.SAVED'), type: 'SUCCESS' });
       };

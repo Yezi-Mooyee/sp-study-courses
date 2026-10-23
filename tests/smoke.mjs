@@ -65,8 +65,19 @@ const context = {
     persistDataSynced: async (value, key) => persisted.set(key, value),
     getAllProjects: async () => [], getAllTags: async () => mockTags, getTasks: async () => mockTasks,
     addTag: async ({ title }) => { tagCreates++; mockTags.push({ id: 'course-tag', title }); return 'course-tag'; },
-    addTask: async (task) => { addedTask = task; addTaskCount++; return `sp-course-task-${addTaskCount}`; },
-    updateTask: async (id, task) => { updatedTask = { id, ...task }; updateCalls.push(updatedTask); },
+    addTask: async (task) => {
+      addedTask = task;
+      addTaskCount++;
+      const id = `sp-course-task-${addTaskCount}`;
+      mockTasks.push({ id, ...task });
+      return id;
+    },
+    updateTask: async (id, task) => {
+      updatedTask = { id, ...task };
+      updateCalls.push(updatedTask);
+      const found = mockTasks.find((entry) => entry.id === id);
+      if (found) Object.assign(found, task);
+    },
     downloadFile: async (filename, data) => { hostDownload = { filename, data }; }, translate: async (key) => key, showSnack() {},
   },
 };
@@ -158,51 +169,42 @@ assert.ok(evaluate("JSON.stringify({ ...state, settings }).includes('\\\"courses
 assert.equal(evaluate('conflictIds(state.courses, 1).size'), 2);
 assert.equal(evaluate('weekStatistics(1).totalMinutes'), 120);
 evaluate("state.courses[0].taskPrefix = '[A]'; state.courses[0].tagIds = ['tag-one']");
-assert.equal(evaluate('taskForCourse(state.courses[0]).tagIds[0]'), 'tag-one');
-// Regression: a course task must carry a real timestamp. SP only puts a task on
-// the schedule timeline when dueWithTime is set; a time string in the title or
-// notes used to leave it as a day-level task that could never show up at its
-// class time.
-const courseTask = evaluate('taskForCourse(state.courses[0])');
-assert.equal(courseTask.dueDay, null, 'course task no longer carries a day-only due date');
-assert.equal(typeof courseTask.dueWithTime, 'number', 'course task carries a dueWithTime timestamp');
-assert.equal(courseTask.dueWithTime, evaluate('nextOccurrence(state.courses[0]).start.getTime()'), 'timestamp is the next class start');
-assert.equal(new Date(courseTask.dueWithTime).getHours(), 9, 'timestamp uses the class start hour');
-assert.equal(courseTask.timeEstimate, 60 * 60000, 'estimate equals the class length');
-assert.equal(courseTask.title, '[A] A', 'title no longer repeats the start time');
-await evaluate('syncCourse(state.courses[0])');
-// SP's addTask create payload has no dueWithTime (it only advertises dueDay, and
-// silently drops anything else), so the day is set at creation and the timestamp
-// in the follow-up updateTask call. Without that second call the task stays
-// unscheduled in the inbox and never reaches the schedule timeline.
-assert.equal(addedTask.dueWithTime, undefined, 'create payload stays day-level');
-assert.match(addedTask.dueDay, /^\d{4}-\d{2}-\d{2}$/, 'create payload carries the class day');
-assert.equal(updatedTask.dueWithTime, courseTask.dueWithTime, 'the follow-up update schedules the task');
-assert.equal(updatedTask.dueDay, null, 'the follow-up update clears the day-only date');
-await evaluate('syncCourse(state.courses[0])');
+// A course task must carry a real timestamp: SP only puts a task on the schedule
+// timeline when dueWithTime is set, and addTask's create payload cannot carry it.
+const occurrence = evaluate('occurrenceFor(state.courses[0], 7)');
+context.occurrence = occurrence;
+const payload = evaluate('taskForOccurrence(state.courses[0], occurrence)');
+assert.equal(payload.dueDay, null, 'the payload does not carry a day-only due date');
+assert.equal(payload.dueWithTime, occurrence.start.getTime(), 'the timestamp is the class start');
+assert.equal(new Date(payload.dueWithTime).getHours(), 9, 'the timestamp uses the class start hour');
+assert.equal(payload.timeEstimate, 60 * 60000, 'the estimate equals the class length');
+assert.equal(payload.title, '[A] A', 'the title does not repeat the start time');
+assert.match(payload.notes, /Occurrence: \d{4}-\d{2}-\d{2}/, 'the notes carry the occurrence date');
+// The plugin cannot create an SP repeat configuration, so the window materialises
+// the current teaching week plus the next one.
+assert.equal(evaluate('syncWindowWeeks().length'), 2, 'two teaching weeks are materialised');
+mockTasks.length = 0;
+const beforeSync = addTaskCount;
+assert.equal(await evaluate('syncCourses([state.courses[0]])'), true);
+assert.equal(addTaskCount - beforeSync, 2, 'one task per class in the window');
+const created = mockTasks.filter((task) => String(task.notes).includes('Course ID: a'));
+assert.equal(created.length, 2, 'both occurrences are linked to the course');
+assert.ok(created.every((task) => task.dueDay === null && typeof task.dueWithTime === 'number'), 'the follow-up update schedules each task');
+assert.equal(Math.round((created[1].dueWithTime - created[0].dueWithTime) / 86400000), 7, 'the two occurrences are a week apart');
+// Repeating the sync must not add copies: course id plus occurrence date is the
+// identity the index looks up, because SP itself never dedupes.
+const beforeRepeat = addTaskCount;
+await evaluate('syncCourses([state.courses[0]])');
+assert.equal(addTaskCount, beforeRepeat, 'a second sync reuses the existing tasks');
 assert.deepEqual(Array.from(addedTask.tagIds), ['tag-one', 'course-tag']);
-assert.equal(tagCreates, 1);
-await evaluate('syncCourse(state.courses[0])');
-assert.ok(updateCalls.some((call) => (call.tagIds || []).includes('course-tag')), 'the update path carries the tag ids');
 assert.equal(tagCreates, 1, 'existing category tag is reused');
-// A link to a task that no longer exists (deleted or archived in SP) must not
-// block re-syncing: the plugin recreates the task instead of giving up on it.
+// An update that fails must not spawn a duplicate either.
+const realUpdateTask = context.PluginAPI.updateTask;
 evaluate('PluginAPI.updateTask = async () => { throw new Error("task gone"); }');
-const beforeRecreate = addTaskCount;
-await evaluate('syncCourse(state.courses[0])');
-assert.equal(addTaskCount, beforeRecreate + 1, 'a stale task link is recreated');
-assert.match(addedTask.dueDay, /^\d{4}-\d{2}-\d{2}$/, 'the recreated task still gets the day');
-evaluate('PluginAPI.updateTask = async (id, task) => { updatedTask = { id, ...task }; };');
-// A task created by an earlier session still points at the course through its
-// notes. A second sync must adopt it rather than add another one — SP itself
-// never dedupes, so this is the only thing standing between repeated clicks and
-// a stack of identical cards in the same time slot.
-mockTasks.push({ id: 'existing-task', notes: 'Course: A\nCourse ID: a\nTime: 09:00-10:00' });
-evaluate('state.courses[0].taskId = null');
-const beforeAdopt = addTaskCount;
-await evaluate('syncCourse(state.courses[0])');
-assert.equal(addTaskCount, beforeAdopt, 'an existing course task is adopted, not duplicated');
-assert.equal(evaluate('state.courses[0].taskId'), 'existing-task', 'the adopted id is stored on the course');
+const beforeFailure = addTaskCount;
+await evaluate('syncCourses([state.courses[0]])');
+assert.equal(addTaskCount, beforeFailure, 'a failing update does not create a second task');
+context.PluginAPI.updateTask = realUpdateTask;
 evaluate('tags = []; PluginAPI.getAllTags = undefined; PluginAPI.addTag = undefined');
 assert.deepEqual(Array.from(await evaluate('courseTaskTagIds(state.courses[0])')), ['tag-one'], 'tag API fallback keeps selected tags');
 evaluate("state.exceptions = [{ id:'x', courseId:'a', week:1, cancelled:true }]");
@@ -296,14 +298,15 @@ await evaluate("$('course-form').onsubmit({ preventDefault() {} })");
 const saved = evaluate("state.courses.find((course) => course.name === 'Saved multi')");
 assert.deepEqual(Array.from(saved.weekdays), [1, 3]);
 assert.equal(saved.weekday, 1, 'the first selected day stays readable to older plugin builds');
-// Two timetable entries of the same course are two tasks. Grouping them into one
-// task with the other slots buried in its notes is what turned a 20-slot week
-// into 12 blocks.
+// Two timetable entries of the same course are separate tasks. Grouping them into
+// one task with the other slots buried in its notes turned a 20-slot week into 12
+// blocks.
 evaluate("state.courses = [{ id:'c1', name:'Calc', weekday:1, startTime:'08:00', endTime:'09:40', startWeek:1, endWeek:16, pattern:'every', customWeeks:[] }, { id:'c2', name:'Calc', weekday:3, startTime:'10:00', endTime:'11:40', startWeek:1, endWeek:16, pattern:'every', customWeeks:[] }]");
 mockTasks.length = 0;
 const beforePerEntry = addTaskCount;
 await evaluate('syncCourses(state.courses)');
-assert.equal(addTaskCount, beforePerEntry + 2, 'each entry becomes its own task');
-assert.notEqual(evaluate('state.courses[0].taskId'), evaluate('state.courses[1].taskId'), 'the entries keep separate task ids');
+assert.equal(addTaskCount - beforePerEntry, 4, 'each entry materialises its own classes in the window');
+const entryIds = mockTasks.map((task) => String(task.notes).match(/Course ID: (\S+)/)?.[1]);
+assert.deepEqual(Array.from(new Set(entryIds)).sort(), ['c1', 'c2'], 'the entries keep separate links');
 assert.ok(!String(addedTask.notes).includes('Sections:'), 'no section list is stuffed into the notes');
 console.log('parser, preview, conflicts, exceptions, ICS, synced persistence smoke passed');
