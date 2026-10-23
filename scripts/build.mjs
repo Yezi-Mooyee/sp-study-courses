@@ -26,7 +26,11 @@ const output = await minify(withMinifiedAssets, {
   minifyJS: false,
 });
 const bytes = Buffer.byteLength(output, 'utf8');
-if (bytes >= 100_000) throw new Error(`Built index.html is ${bytes} bytes; plugin limit is 100,000`);
+// SP caps index.html at MAX_PLUGIN_MANIFEST_SIZE = 100 * 1024 (plugin.const.ts,
+// enforced in plugin.service.ts). The old 100_000 here was stricter than the host
+// and threw away 2,400 usable bytes.
+const PLUGIN_HTML_LIMIT = 100 * 1024;
+if (bytes >= PLUGIN_HTML_LIMIT) throw new Error(`Built index.html is ${bytes} bytes; plugin limit is ${PLUGIN_HTML_LIMIT}`);
 
 const destination = new URL('../dist/', import.meta.url);
 mkdirSync(destination, { recursive: true });
@@ -35,4 +39,4 @@ for (const name of ['manifest.json', 'plugin.js', 'icon.svg', 'course-import-tem
   copyFileSync(new URL(`../${name}`, import.meta.url), new URL(name, destination));
 }
 cpSync(new URL('../i18n/', import.meta.url), new URL('i18n/', destination), { recursive: true });
-console.log(`Built dist/index.html: ${bytes} bytes (limit: 100,000)`);
+console.log(`Built dist/index.html: ${bytes} bytes (limit: ${PLUGIN_HTML_LIMIT})`);
