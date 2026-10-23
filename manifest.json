@@ -2,11 +2,17 @@
   "name": "Courses & Timetable",
   "id": "study-courses",
   "manifestVersion": 1,
-  "version": "2.7.0",
+  "version": "2.8.0",
   "minSupVersion": "18.21.2",
   "description": "Course, semester and week-aware timetable for students.",
   "author": "SCSldr",
-  "hooks": ["languageChange", "persistedDataChanged", "taskUpdate", "taskComplete", "taskDelete"],
+  "hooks": [
+    "languageChange",
+    "persistedDataChanged",
+    "taskUpdate",
+    "taskComplete",
+    "taskDelete"
+  ],
   "permissions": [
     "addTask",
     "updateTask",
@@ -21,7 +27,12 @@
     "showIndexHtmlAsView",
     "showSnack"
   ],
-  "i18n": { "languages": ["en", "zh"] },
+  "i18n": {
+    "languages": [
+      "en",
+      "zh"
+    ]
+  },
   "iFrame": true,
   "sidePanel": false,
   "type": "standard",
