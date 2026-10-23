@@ -4,7 +4,9 @@
 
 Manage university courses, teaching weeks, assignments, timetable imports, and calendar exports directly inside Super Productivity.
 
-Current version `2.7.0` lets one course meet on several weekdays, adds host dark-theme support, a phone timetable that lists the whole teaching week, attribute-safe HTML escaping, and a deterministic local/CI release ZIP. See [requirements and mobile audit](REQUIREMENTS.md) and the [development log](DEVELOPMENT_LOG.md).
+> **Fork notice.** This is a personal fork of [Khk-NL/sp-study-courses](https://github.com/Khk-NL/sp-study-courses). The upstream plugin covers the timetable itself but left several things unsatisfactory — synced tasks without a real time, one task per course instead of per class, everything landing in the Inbox — so this fork reworks the Super Productivity side. 中文说明见下方「分支说明」。
+
+Current version `2.8.0` adds timed class tasks, a rolling two-week sync window, a dedicated project for synced tasks, and per-entry tasks instead of one task per course. It also moves all UI strings into the plugin's i18n files, which keeps the built `index.html` well under the host's 100 KiB iframe limit. See [requirements and mobile audit](REQUIREMENTS.md), the [development log](DEVELOPMENT_LOG.md), and the [2.8.0 release notes](https://github.com/Yezi-Mooyee/sp-study-courses/releases/tag/v2.8.0).
 
 [English](#english) | [中文](#中文)
 
@@ -42,12 +44,19 @@ Current version `2.7.0` lets one course meet on several weekdays, adds host dark
 - Create assignment tasks directly in a selected Super Productivity project
 - Keep course-related work connected with your normal task workflow
 
+#### Synced class tasks
+- Each timetable entry becomes its own task, scheduled with a real time so it lands on the schedule timeline and can carry a reminder
+- Sync keeps a rolling window of the current teaching week plus the next one; a timer tops it up while the plugin page is open
+- Rescheduling and cancellation are respected: a cancelled week produces no task, a moved class produces it at the new time and place
+- Repeated syncs are idempotent — course id plus date identifies a task, so nothing duplicates
+- Tasks go to their own project (name and suffix configurable, `课程[Course]` by default) instead of the Inbox
+
 #### Calendar export
 - Export the timetable as an `.ics` calendar file
 - Import the exported calendar into compatible calendar applications
 
 #### Integration
-- English and Chinese translations
+- English and Chinese translations, resolved through the host from `i18n/*.json`
 - Automatically follows the Super Productivity language
 - Uses synced plugin storage for course data and display settings
 
@@ -187,6 +196,16 @@ Package the generated `dist/index.html`, not the readable source at the reposito
 - 可选择作业所属的 SP 项目
 - 将课程管理与日常任务管理结合
 
+#### 同步的课程任务
+- 每一条课表记录生成一条独立任务，带真实时间，因此进入日程时间轴、也能设提醒
+- 同步维护「当前教学周 + 下一周」的滚动窗口，插件页面打开时定时补齐下一周
+- 尊重调课与停课：停课那一周不生成任务，调课按新时间地点生成
+- 重复同步不会增生：课程 id + 日期 才是任务身份
+- 任务进入独立项目（名称与后缀可配置，默认 `课程[Course]`），不再堆在收件箱
+
+#### 分支说明
+本仓库是 [Khk-NL/sp-study-courses](https://github.com/Khk-NL/sp-study-courses) 的个人分支。上游把课表本身做得很完整，但 Super Productivity 这一侧有几处不尽人意——同步出的任务没有真实时间、一门课只对应一条任务、所有任务都落进收件箱——因此这个分支重做了同步部分。与原项目相同，仍以 MIT 许可证发布。
+
 #### 日历导出
 - 支持导出 `.ics` 日历文件
 - 可导入兼容 ICS 的日历应用
@@ -304,4 +323,6 @@ package.cmd
 [MIT](LICENSE)
 
 Maintained by [Khk-NL](https://github.com/Khk-NL). The `author` field in `manifest.json` credits the same maintainer under the publishing name `SCSldr`.
-```
+
+Fork maintained by Yezi Mooyee <yezi_mooyee@qq.com> under the same MIT license. Copyright notices for the changes in this fork are listed in [LICENSE](LICENSE).
+
